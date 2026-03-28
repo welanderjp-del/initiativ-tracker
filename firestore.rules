@@ -1,0 +1,52 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: monsters
+// Document ID: {monsterSlug}
+// Fields:
+//   - slug: string (required) - unique identifier
+//   - name: string (required) - monster name
+//   - htmlContent: string (required) - stat block HTML
+//   - lastUpdated: timestamp (optional) - update time
+//
+// ===============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "welander.jp@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    // Monster Cache Rules
+    match /monsters/{monsterSlug} {
+      // Anyone can read cached monster data
+      allow read: if true;
+      
+      // Only authenticated users can update/create cache entries
+      // (In a production app, you might restrict this to admins or specific roles)
+      allow create, update: if isAuthenticated() && 
+        request.resource.data.slug is string &&
+        request.resource.data.name is string &&
+        request.resource.data.htmlContent is string &&
+        request.resource.data.htmlContent.size() < 100000; // Limit size to prevent abuse
+      
+      allow delete: if isAdmin();
+    }
+
+    // User Profile Rules (Basic)
+    match /users/{userId} {
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      allow write: if isAuthenticated() && request.auth.uid == userId;
+    }
+  }
+}
