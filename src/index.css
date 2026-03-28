@@ -1,0 +1,302 @@
+@import "tailwindcss";
+
+@theme {
+  --color-surface-bg: #f0f7ff; /* Airy sky blue */
+  --color-surface-card: #ffffff;
+  --color-surface-text: #1a3a5a;
+  --color-surface-accent: #3b82f6;
+  --color-surface-border: #d1e9ff;
+
+  --color-underdark-bg: #1a1a2e;
+  --color-underdark-card: #16213e;
+  --color-underdark-text: #e94560;
+  --color-underdark-accent: #0f3460;
+  --color-underdark-border: #4e342e;
+
+  --color-feywild-bg: #f1f8e9;
+  --color-feywild-card: #ffffff;
+  --color-feywild-text: #2e7d32;
+  --color-feywild-accent: #8bc34a;
+  --color-feywild-border: #c5e1a5;
+
+  --color-shadowfell-bg: #212121;
+  --color-shadowfell-card: #424242;
+  --color-shadowfell-text: #bdbdbd;
+  --color-shadowfell-accent: #616161;
+  --color-shadowfell-border: #000000;
+}
+
+body {
+  @apply transition-colors duration-300 min-h-screen;
+  background-color: var(--bg);
+  color: var(--text);
+}
+
+.theme-surface {
+  --bg: var(--color-surface-bg);
+  --card: var(--color-surface-card);
+  --text: var(--color-surface-text);
+  --accent: var(--color-surface-accent);
+  --border: var(--color-surface-border);
+}
+
+.theme-underdark {
+  --bg: var(--color-underdark-bg);
+  --card: var(--color-underdark-card);
+  --text: #ffffff;
+  --accent: var(--color-underdark-text);
+  --border: #333;
+}
+
+.theme-feywild {
+  --bg: var(--color-feywild-bg);
+  --card: var(--color-feywild-card);
+  --text: var(--color-feywild-text);
+  --accent: #4caf50;
+  --border: var(--color-feywild-border);
+}
+
+.theme-shadowfell {
+  --bg: var(--color-shadowfell-bg);
+  --card: var(--color-shadowfell-card);
+  --text: var(--color-shadowfell-text);
+  --accent: #757575;
+  --border: var(--color-shadowfell-border);
+}
+
+/* Remove initiative spin buttons */
+.no-spinner::-webkit-outer-spin-button,
+.no-spinner::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.no-spinner {
+  -moz-appearance: textfield;
+}
+
+/* Monster Info Popup Styling */
+.monster-info-popup {
+  @apply fixed z-[100] p-6 rounded-xl shadow-2xl border-2;
+  background-color: #fdf1dc; /* Classic D&D paper color */
+  border-color: #9c2b1b;
+  color: #333;
+  font-family: 'Georgia', serif;
+  overflow-y: auto;
+  overflow-x: hidden !important;
+}
+
+.monster-info-content {
+  column-width: 350px;
+  column-gap: 2.5rem;
+  column-rule: 1px solid rgba(156, 43, 27, 0.2);
+  text-align: justify;
+  column-fill: balance;
+  overflow: visible;
+  height: auto !important;
+}
+
+/* Ensure sections don't break across columns weirdly */
+.monster-info-content p, 
+.monster-info-content .rub, 
+.monster-info-content .car-block,
+.monster-info-content table {
+  break-inside: avoid;
+  margin-bottom: 0.5rem;
+}
+
+.monster-info-content h1 {
+  column-span: all;
+  margin-bottom: 1rem;
+}
+
+.monster-info-popup .jaune {
+  @apply leading-relaxed;
+}
+
+.monster-info-popup h1 {
+  @apply text-3xl font-bold mb-0 uppercase tracking-tighter;
+  color: #9c2b1b;
+  border-bottom: 2px solid #9c2b1b;
+}
+
+.monster-info-popup .type {
+  @apply italic text-sm mb-2;
+  color: #555;
+  column-span: all;
+}
+
+.monster-info-popup .red {
+  color: #9c2b1b;
+}
+
+.monster-info-popup .rub {
+  @apply text-xl font-bold mt-4 mb-1 border-b uppercase;
+  color: #9c2b1b;
+  border-color: #9c2b1b;
+}
+
+/* Fix for actual tables in the content */
+.monster-info-popup table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.9em;
+  line-height: 1.2;
+}
+
+.monster-info-popup th {
+  text-align: left;
+  color: #9c2b1b;
+  border-bottom: 1px solid #9c2b1b;
+  padding: 4px;
+}
+
+.monster-info-popup td {
+  padding: 4px;
+  border-bottom: 1px solid rgba(0,0,0,0.05);
+}
+
+/* Stats Grid Simulation - Matching the uploaded image style */
+.monster-info-popup .car-block-grid,
+.monster-info-popup .car-block-grid-simple {
+  display: grid !important;
+  grid-template-columns: repeat(12, 1fr) !important;
+  grid-auto-flow: row !important;
+  width: 100% !important;
+  min-width: 450px !important;
+  margin: 1rem auto !important;
+  gap: 1px !important;
+  background-color: #d9d4cc !important;
+  border: 1px solid #d9d4cc !important;
+  break-inside: avoid !important;
+  column-span: all !important;
+  box-sizing: border-box !important;
+  overflow: visible !important;
+  float: none !important;
+  clear: both !important;
+}
+
+.monster-info-popup .car-block-grid-simple {
+  grid-template-columns: repeat(6, 1fr) !important;
+  min-width: 300px !important;
+}
+
+.monster-info-popup .car-block-grid > div,
+.monster-info-popup .car-block-grid-simple > div {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 4px 2px !important;
+  font-size: 11px !important;
+  font-weight: bold !important;
+  min-height: 32px !important;
+  color: #9c2b1b !important;
+  text-transform: uppercase !important;
+  text-align: center !important;
+  background-color: #e9e7e1 !important;
+  width: auto !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+  flex-direction: column !important;
+}
+
+/* Row 1 Headers (MOD, SAVE) */
+.monster-info-popup .car-block-grid > div:nth-child(n+1):nth-child(-n+12) {
+  font-size: 9px !important;
+  opacity: 0.8;
+  min-height: 24px !important;
+}
+
+/* Every 2nd column in a 4-column block (the Score column) should be gray */
+.monster-info-popup .car-block-grid > div:nth-child(4n+2) {
+  background-color: #f2f1ed !important;
+}
+
+/* Blank header cells in Row 1 should be white or transparent if they are not the score column */
+.monster-info-popup .car-block-grid > div:nth-child(1),
+.monster-info-popup .car-block-grid > div:nth-child(5),
+.monster-info-popup .car-block-grid > div:nth-child(9) {
+  background-color: #e9e7e1 !important;
+}
+
+/* Ensure the blank cells in Row 1 that are in the score column are also gray */
+.monster-info-popup .car-block-grid > div:nth-child(2),
+.monster-info-popup .car-block-grid > div:nth-child(6),
+.monster-info-popup .car-block-grid > div:nth-child(10) {
+  background-color: #f2f1ed !important;
+}
+
+/* Handle "MOD" and "SAVE" headers if they are separate items */
+.monster-info-popup .car-block > div:empty {
+  background-color: transparent !important;
+  border: none !important;
+}
+
+.monster-info-popup .car, 
+.monster-info-popup .car1, 
+.monster-info-popup .car2, 
+.monster-info-popup .car3, 
+.monster-info-popup .car4, 
+.monster-info-popup .car5, 
+.monster-info-popup .car6 {
+  /* Reset some styles if they were applied elsewhere */
+  @apply flex items-center justify-center p-1 text-[11px] font-bold;
+  min-height: 32px;
+  color: #7a0303;
+  text-transform: uppercase;
+  text-align: center;
+}
+
+.monster-info-popup .car2, 
+.monster-info-popup .car4, 
+.monster-info-popup .car6 {
+  background-color: #f2f1ed;
+}
+
+/* Specific styling for Score/Mod values */
+.monster-info-popup .car2, 
+.monster-info-popup .car4, 
+.monster-info-popup .car6 {
+  font-size: 13px;
+}
+
+/* Handle headers if they are in the first row */
+.monster-info-popup .car-block > div:nth-child(-n+12) {
+  font-size: 10px;
+  opacity: 0.7;
+  min-height: 24px;
+}
+
+/* Responsive: Single column on small screens */
+@media (max-width: 1000px) {
+  .monster-info-content {
+    column-count: 1;
+  }
+}
+
+/* Theme Overrides for Header Contrast */
+.theme-underdark header, .theme-shadowfell header {
+  --text: #ffffff;
+}
+
+.theme-underdark select, .theme-shadowfell select {
+  color: white;
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Responsive adjustments */
+.tracker-grid {
+  display: grid;
+  grid-template-columns: 60px 60px minmax(150px, 1.5fr) 80px 100px minmax(150px, 2fr) 50px;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+@media (max-width: 768px) {
+  .tracker-grid {
+    grid-template-columns: 50px 50px 1fr 60px 80px 1fr 40px;
+    gap: 0.25rem;
+  }
+}
