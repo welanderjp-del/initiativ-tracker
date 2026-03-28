@@ -15,14 +15,44 @@ async function startServer() {
 
   app.use(express.json({ limit: '50mb' }));
 
-  // API Route to proxy monster data from aidedd (avoids CORS)
-  app.get("/monster-data.json", (req, res) => {
-    const filePath = path.join(process.cwd(), "monster-data.json");
-    if (fs.existsSync(filePath)) {
-      res.sendFile(filePath);
-    } else {
-      res.status(404).json({ error: "File not found" });
+  // Load monster data from file if it exists
+  let monsterData: Record<string, string> = {};
+  const loadMonsterData = () => {
+    const paths = [
+      path.join(process.cwd(), "public", "monster-data.json"),
+      path.join(process.cwd(), "monster-data.json"),
+      path.join(__dirname, "public", "monster-data.json"),
+      path.join(__dirname, "monster-data.json")
+    ];
+    
+    for (const filePath of paths) {
+      if (fs.existsSync(filePath)) {
+        try {
+          const content = fs.readFileSync(filePath, "utf-8");
+          monsterData = JSON.parse(content);
+          console.log(`Loaded ${Object.keys(monsterData).length} monsters from ${filePath}`);
+          return true;
+        } catch (e) {
+          console.error(`Failed to parse ${filePath}:`, e);
+        }
+      }
     }
+    return false;
+  };
+
+  loadMonsterData();
+
+  // API Route to serve the whole monster data file
+  app.get("/monster-data.json", (req, res) => {
+    if (Object.keys(monsterData).length === 0) {
+      loadMonsterData();
+    }
+    
+    if (Object.keys(monsterData).length > 0) {
+      return res.json(monsterData);
+    }
+    
+    res.status(404).json({ error: "Monster data file not found" });
   });
 
   app.get("/api/test-connection", async (req, res) => {
@@ -42,6 +72,16 @@ async function startServer() {
 
   app.get("/api/monster/:slug", async (req, res) => {
     const { slug } = req.params;
+    
+    // Check local data first
+    if (Object.keys(monsterData).length === 0) {
+      loadMonsterData();
+    }
+    
+    if (monsterData[slug]) {
+      return res.json({ html: monsterData[slug] });
+    }
+
     const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
     
     const tryFetch = async (url: string, name: string) => {

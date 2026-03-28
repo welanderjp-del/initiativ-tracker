@@ -50,13 +50,17 @@ export default function App() {
   useEffect(() => {
     const loadFullData = async () => {
       try {
-        const response = await fetch("/monster-data.json");
+        // Add cache busting to ensure we get the latest valid version
+        const response = await fetch(`/monster-data.json?v=${Date.now()}`);
         if (response.ok) {
           const data = await response.json();
           setFullMonsterData(data);
+          console.log(`Successfully loaded ${Object.keys(data).length} monsters from local data.`);
+        } else {
+          console.warn(`Failed to load monster-data.json: ${response.status} ${response.statusText}`);
         }
       } catch (e) {
-        console.warn("Local monster-data.json not found or failed to load");
+        console.error("Error loading monster-data.json:", e);
       }
     };
     loadFullData();
@@ -162,6 +166,16 @@ export default function App() {
   };
 
   const processJaune = (jaune: Element) => {
+    // Fix image paths to use aidedd.org base URL
+    jaune.querySelectorAll('img').forEach(img => {
+      const src = img.getAttribute('src');
+      if (src && !src.startsWith('http') && !src.startsWith('data:')) {
+        // If it's a relative path like "img/beholder.jpg", prefix it
+        img.setAttribute('src', `https://www.aidedd.org/monster/${src}`);
+      }
+      img.setAttribute('referrerpolicy', 'no-referrer');
+    });
+
     const statLabelsMap: { [key: string]: string } = {
       "STR": "STR", "FOR": "STR",
       "DEX": "DEX",
@@ -389,9 +403,45 @@ export default function App() {
   const fetchMonsterInfo = async (slug: string) => {
     if (monsterCache[slug] || loadingSlugs.has(slug)) return;
 
-    // Check local full data first
+    // Check local full data first (this state is populated from /monster-data.json)
     if (fullMonsterData[slug]) {
-      const html = fullMonsterData[slug];
+      try {
+        const html = fullMonsterData[slug];
+        const parser = new DOMParser();
+        const docObj = parser.parseFromString(html, "text/html");
+        const jaune = docObj.querySelector(".jaune") || docObj.body;
+        
+        if (jaune) {
+          processJaune(jaune as HTMLElement);
+          const content = jaune.innerHTML;
+          setMonsterCache(prev => ({ ...prev, [slug]: content }));
+          return;
+        }
+      } catch (e) {
+        console.error(`Error processing local data for ${slug}:`, e);
+      }
+    }
+    
+    // If not in fullMonsterData or processing failed, try API
+    setLoadingSlugs(prev => new Set(prev).add(slug));
+    
+    try {
+      // Fetch from Server Proxy (which also checks its own local copy of monster-data.json)
+      const response = await fetch(`/api/monster/${slug}`);
+      if (!response.ok) {
+        if (response.status === 404) {
+          throw new Error(`Monster '${slug}' blev ikke fundet.`);
+        }
+        throw new Error(`Server fejl (${response.status})! Prøv igen senere.`);
+      }
+      
+      const data = await response.json();
+      const html = data.html;
+      
+      if (!html || html.length < 100) {
+        throw new Error("Ingen data modtaget for dette monster.");
+      }
+
       const parser = new DOMParser();
       const docObj = parser.parseFromString(html, "text/html");
       const jaune = docObj.querySelector(".jaune") || docObj.body;
@@ -400,34 +450,13 @@ export default function App() {
         processJaune(jaune as HTMLElement);
         const content = jaune.innerHTML;
         setMonsterCache(prev => ({ ...prev, [slug]: content }));
-        return;
-      }
-    }
-    
-    // If not in fullMonsterData, try cache or API
-    if (monsterCache[slug]) return;
-    
-    setLoadingSlugs(prev => new Set(prev).add(slug));
-    
-    try {
-      // Fetch from Server Proxy
-      const response = await fetch(`/api/monster/${slug}`);
-      if (!response.ok) throw new Error(`Server error! status: ${response.status}`);
-      
-      const data = await response.json();
-      const html = data.html;
-      const parser = new DOMParser();
-      const docObj = parser.parseFromString(html, "text/html");
-      const jaune = docObj.querySelector(".jaune");
-      
-      if (jaune) {
-        processJaune(jaune);
-        const content = jaune.innerHTML;
-        setMonsterCache(prev => ({ ...prev, [slug]: content }));
+      } else {
+        throw new Error("Kunne ikke finde monster-data i svaret.");
       }
     } catch (e) {
-      console.error("Fetch failed:", e);
-      setMonsterCache(prev => ({ ...prev, [slug]: "<div class='p-4 text-red-500 font-bold'>Fejl ved hentning af monster info. Prøv igen senere.</div>" }));
+      console.error(`Fetch failed for ${slug}:`, e);
+      const errorMsg = e instanceof Error ? e.message : "Fejl ved hentning af monster info.";
+      setMonsterCache(prev => ({ ...prev, [slug]: `<div class='p-4 text-red-500 font-bold'>${errorMsg}</div>` }));
     } finally {
       setLoadingSlugs(prev => {
         const next = new Set(prev);
@@ -554,26 +583,28 @@ export default function App() {
       
       const monster = MONSTER_LIST[i];
       
+      // Skip if we already have it in our results
       if (results[monster.slug]) {
-        successCount++;
         setScrapedCount(i + 1);
         setScrapeProgress(Math.round(((i + 1) / total) * 100));
         continue;
       }
 
+      setScrapeStatus(`Henter ${monster.name}...`);
       let fetchedHtml = null;
       let lastError = "";
-      let retries = 1;
+      let retries = 2; // Increased retries
       
       while (retries >= 0 && !fetchedHtml) {
         try {
           const response = await fetch(`/api/monster/${monster.slug}`);
           if (response.ok) {
             const data = await response.json();
-            if (data.html && data.html.length > 100) {
+            // Basic validation of the HTML content
+            if (data.html && data.html.length > 200 && data.html.includes("jaune")) {
               fetchedHtml = data.html;
             } else {
-              lastError = "Tomt svar fra server";
+              lastError = "Ugyldig HTML struktur modtaget";
             }
           } else {
             lastError = `Status ${response.status}`;
@@ -583,7 +614,7 @@ export default function App() {
         }
         
         if (!fetchedHtml && retries > 0) {
-          await new Promise(r => setTimeout(r, 500));
+          await new Promise(r => setTimeout(r, 1000)); // Wait longer between retries
         }
         retries--;
       }
@@ -591,6 +622,11 @@ export default function App() {
       if (fetchedHtml) {
         results[monster.slug] = fetchedHtml;
         successCount++;
+        
+        // Update state every 5 monsters to keep progress and avoid losing data on crash/refresh
+        if (successCount % 5 === 0) {
+          setFullMonsterData({ ...results });
+        }
       } else {
         failCount++;
         setScrapeErrors(prev => [...prev.slice(-4), `${monster.name}: ${lastError}`]);
@@ -598,13 +634,16 @@ export default function App() {
       
       setScrapedCount(i + 1);
       setScrapeProgress(Math.round(((i + 1) / total) * 100));
-      await new Promise(r => setTimeout(r, 200));
+      // Small delay to be nice to the server
+      await new Promise(r => setTimeout(r, 150));
     }
     
-    setFullMonsterData(results);
+    // Final state update
+    setFullMonsterData({ ...results });
     setIsScraping(false);
-    setScrapeStatus(`Færdig! ${successCount} succes, ${failCount} fejl.`);
+    setScrapeStatus(`Færdig! ${successCount} nye hentet. Total: ${Object.keys(results).length} monstre.`);
     
+    // Always offer download if we have data, even if stopped
     if (Object.keys(results).length > 0) {
       const blob = new Blob([JSON.stringify(results, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
@@ -892,16 +931,16 @@ export default function App() {
       {/* Footer info */}
       <footer className="mt-8 text-center opacity-10 hover:opacity-100 transition-opacity text-[10px] pb-8">
         <div className="flex flex-col items-center justify-center gap-4 max-w-md mx-auto">
-          <div className="flex items-center gap-1 group">
+          <div className="flex items-center gap-2">
             <span className="text-gray-500">Genveje: Enter (Næste), Backspace (Forrige), + (Tilføj), - (Fjern)</span>
             <button 
               onClick={() => setShowScrapingTools(!showScrapingTools)}
-              className="p-0.5 hover:bg-black/5 rounded transition-colors text-gray-400 opacity-0 group-hover:opacity-100"
-              title="Scraping værktøjer"
+              className="p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded transition-all text-gray-400/30 hover:text-gray-400"
+              title="Avancerede værktøjer"
             >
               <ChevronRight 
-                size={10} 
-                className={`transition-transform duration-200 ${showScrapingTools ? "rotate-90" : ""}`} 
+                size={12} 
+                className={`transition-transform duration-300 ${showScrapingTools ? "rotate-90" : ""}`} 
               />
             </button>
           </div>
