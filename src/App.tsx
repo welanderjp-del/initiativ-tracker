@@ -1,11 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Plus, Minus, Trash2, RotateCcw, ChevronRight, ChevronLeft, X, Search, LogIn, Database } from "lucide-react";
+import { Plus, Minus, Trash2, RotateCcw, ChevronRight, ChevronLeft, X, Search, LogIn, Database, ShieldCheck } from "lucide-react";
 import { MONSTER_LIST } from "./constants";
 import { TrackerRow, Theme, AppState } from "./types";
-import { db, auth, signIn } from './firebase';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { onAuthStateChanged, User } from 'firebase/auth';
 
 const LOCAL_STORAGE_KEY = "dd-initiative-tracker-state";
 
@@ -19,8 +16,10 @@ export default function App() {
   const [loadingSlugs, setLoadingSlugs] = useState<Set<string>>(new Set());
   const [activeDropdownId, setActiveDropdownId] = useState<string | null>(null);
   const [monsterCache, setMonsterCache] = useState<Record<string, string>>({});
-  const [user, setUser] = useState<User | null>(null);
+  const [localMonsters, setLocalMonsters] = useState<Record<string, string>>({});
+  const [isAdmin, setIsAdmin] = useState(false);
   const [isCachingAll, setIsCachingAll] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [cacheProgress, setCacheProgress] = useState(0);
   const [isHoveringPopup, setIsHoveringPopup] = useState(false);
   const isHoveringPopupRef = useRef(false);
@@ -37,10 +36,24 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
-    });
-    return () => unsubscribe();
+    const loadLocalMonsters = async () => {
+      try {
+        const response = await fetch("/monsters.json");
+        if (response.ok) {
+          const data = await response.json();
+          setLocalMonsters(data);
+          console.log(`Loaded ${Object.keys(data).length} monsters from local file.`);
+        }
+      } catch (err) {
+        console.warn("Local monsters.json not found or failed to load. Using server proxy.");
+      }
+    };
+    loadLocalMonsters();
+    
+    // Check if admin was previously enabled
+    if (localStorage.getItem("admin-mode") === "true") {
+      setIsAdmin(true);
+    }
   }, []);
 
   // Load state from localStorage
@@ -81,21 +94,14 @@ export default function App() {
   }, [currentTurnId]);
 
   const cacheAllMonsters = async () => {
-    if (!user) {
-      alert("Du skal være logget ind for at cache monstre.");
-      return;
-    }
+    if (!isAdmin) return;
     setIsCachingAll(true);
     let count = 0;
     for (const monster of MONSTER_LIST) {
       try {
-        const monsterDocRef = doc(db, "monsters", monster.slug);
-        const monsterDoc = await getDoc(monsterDocRef);
-        if (!monsterDoc.exists()) {
-          await fetchMonsterInfo(monster.slug);
-          // Small delay to avoid rate limiting
-          await new Promise(r => setTimeout(r, 500));
-        }
+        await fetchMonsterInfo(monster.slug);
+        // Small delay to avoid rate limiting
+        await new Promise(r => setTimeout(r, 300));
       } catch (err) {
         console.error(`Failed to cache ${monster.name}:`, err);
       }
@@ -104,6 +110,32 @@ export default function App() {
     }
     setIsCachingAll(false);
     alert("Caching færdig!");
+  };
+
+  const exportToLocalFile = async () => {
+    if (!isAdmin) return;
+    
+    setIsExporting(true);
+    try {
+      // Fetch current cache from server to ensure we have everything
+      const response = await fetch("/api/save-monsters", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(monsterCache),
+      });
+
+      const result = await response.json();
+      if (result.success) {
+        alert(`Succes! ${result.count} monstre er gemt lokalt i public/monsters.json.`);
+      } else {
+        throw new Error(result.error);
+      }
+    } catch (err) {
+      console.error("Export failed:", err);
+      alert("Eksport fejlede.");
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const removeRow = useCallback((id: string) => {
@@ -398,97 +430,46 @@ export default function App() {
 
   const fetchMonsterInfo = async (slug: string) => {
     if (monsterCache[slug] || loadingSlugs.has(slug)) return;
+    
+    // 0. Try local JSON cache first
+    if (localMonsters[slug]) {
+      setMonsterCache(prev => ({ ...prev, [slug]: localMonsters[slug] }));
+      return;
+    }
+    
     setLoadingSlugs(prev => new Set(prev).add(slug));
     
     try {
-      // 1. Try Firestore Cache first
-      const monsterDocRef = doc(db, "monsters", slug);
-      const monsterDoc = await getDoc(monsterDocRef);
+      // 1. Try Server Cache / Proxy
+      const response = await fetch(`/api/monster/${slug}`);
+      if (!response.ok) throw new Error(`Server error! status: ${response.status}`);
       
-      if (monsterDoc.exists()) {
-        const data = monsterDoc.data();
-        setMonsterCache(prev => ({ ...prev, [slug]: data.htmlContent }));
-        setLoadingSlugs(prev => {
-          const next = new Set(prev);
-          next.delete(slug);
-          return next;
-        });
-        return;
-      }
-
-      // 2. If not in Firestore, fetch from aidedd via proxy
-      const url = `https://www.aidedd.org/monster/${slug}`;
-      const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+      const data = await response.json();
       
-      const response = await fetch(proxyUrl);
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      
-      const html = await response.text();
-      const parser = new DOMParser();
-      const docObj = parser.parseFromString(html, "text/html");
-      const jaune = docObj.querySelector(".jaune");
-      
-      if (jaune) {
-        processJaune(jaune);
-        const content = jaune.innerHTML;
-        setMonsterCache(prev => ({ ...prev, [slug]: content }));
-        
-        // 3. Save to Firestore for future users
-        if (auth.currentUser) {
-          try {
-            const monsterData = MONSTER_LIST.find(m => m.slug === slug);
-            await setDoc(monsterDocRef, {
-              slug,
-              name: monsterData?.name || slug,
-              htmlContent: content,
-              lastUpdated: serverTimestamp()
-            });
-          } catch (err) {
-            console.warn("Failed to cache to Firestore:", err);
-          }
-        }
-      } else {
-        throw new Error("Content not found with primary proxy");
-      }
-    } catch (e) {
-      // ... existing fallback logic ...
-      console.warn("Primary proxy failed, trying fallback...", e);
-      try {
-        const url = `https://www.aidedd.org/monster/${slug}`;
-        const fallbackUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-        const response = await fetch(fallbackUrl);
-        const data = await response.json();
-        const html = data.contents;
+      if (data.source === "cache") {
+        setMonsterCache(prev => ({ ...prev, [slug]: data.html }));
+      } else if (data.source === "remote") {
+        const html = data.html;
         const parser = new DOMParser();
-        const doc = parser.parseFromString(html, "text/html");
-        const jaune = doc.querySelector(".jaune");
+        const docObj = parser.parseFromString(html, "text/html");
+        const jaune = docObj.querySelector(".jaune");
+        
         if (jaune) {
           processJaune(jaune);
-          setMonsterCache(prev => ({ ...prev, [slug]: jaune.innerHTML }));
-        } else {
-          throw new Error("Content not found with secondary proxy");
-        }
-      } catch (fallbackError) {
-        console.warn("Second proxy failed, trying third fallback...", fallbackError);
-        try {
-          const url = `https://www.aidedd.org/monster/${slug}`;
-          const thirdUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`;
-          const response = await fetch(thirdUrl);
-          const html = await response.text();
-          const parser = new DOMParser();
-          const doc = parser.parseFromString(html, "text/html");
-          const jaune = doc.querySelector(".jaune");
-          if (jaune) {
-            processJaune(jaune);
-            setMonsterCache(prev => ({ ...prev, [slug]: jaune.innerHTML }));
-          } else {
-            setMonsterCache(prev => ({ ...prev, [slug]: "<div class='p-4 text-red-500 font-bold'>Ingen information fundet for dette monster på aidedd.org.</div>" }));
-          }
-        } catch (thirdError) {
-          console.error("All proxies failed:", thirdError);
-          setMonsterCache(prev => ({ ...prev, [slug]: "<div class='p-4 text-red-500 font-bold'>Fejl ved hentning af monster info. Alle proxyer fejlede. Prøv igen senere eller tjek din internetforbindelse.</div>" }));
+          const content = jaune.innerHTML;
+          setMonsterCache(prev => ({ ...prev, [slug]: content }));
+          
+          // 2. Save to Server Cache
+          await fetch("/api/save-monster", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ slug, html: content }),
+          });
         }
       }
+    } catch (e) {
+      console.error("Fetch failed:", e);
+      setMonsterCache(prev => ({ ...prev, [slug]: "<div class='p-4 text-red-500 font-bold'>Fejl ved hentning af monster info. Prøv igen senere.</div>" }));
     } finally {
       setLoadingSlugs(prev => {
         const next = new Set(prev);
@@ -602,10 +583,19 @@ export default function App() {
       {/* Header */}
       <header className="flex flex-col md:flex-row items-center justify-between gap-4 mb-4 bg-[var(--card)] p-4 rounded-xl border border-[var(--border)] shadow-lg sticky top-0 z-50">
         <div className="flex items-center gap-4">
-          <a href="https://skolechips.dk" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
+          <div 
+            className="flex items-center gap-3 hover:opacity-80 transition-opacity cursor-pointer"
+            onClick={() => {
+              const pass = prompt("Admin adgangskode:");
+              if (pass === "admin123") { // Simple placeholder password
+                setIsAdmin(true);
+                localStorage.setItem("admin-mode", "true");
+              }
+            }}
+          >
             <img src="https://res.cloudinary.com/dtw8jfk0k/image/upload/v1774706790/d4b01caa-2d0a-405a-b893-1a04cfefab27_qf9jsx.png" alt="Logo" className="w-10 h-10" referrerPolicy="no-referrer" />
             <h1 className="text-2xl font-bold text-[var(--accent)]">D&D Initiativ</h1>
-          </a>
+          </div>
           <div className="h-8 w-px bg-[var(--border)] mx-2" />
           <div className="text-lg font-semibold">Runde: {round}</div>
         </div>
@@ -860,23 +850,44 @@ export default function App() {
         <p className="flex items-center justify-center gap-2">
           <span>Genveje: Enter (Næste), Backspace (Forrige), + (Tilføj), - (Fjern)</span>
           <span className="opacity-30">|</span>
-          {user ? (
+          {isAdmin ? (
             <span className="flex items-center gap-2">
-              <span className="opacity-50">{user.email}</span>
-              {user.email === "welander.jp@gmail.com" && (
-                <button 
-                  onClick={cacheAllMonsters} 
-                  disabled={isCachingAll} 
+              <span className="flex items-center gap-1 text-green-600 font-bold">
+                <ShieldCheck size={10} />
+                Admin
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={cacheAllMonsters}
+                  disabled={isCachingAll}
                   className="hover:text-[var(--accent)] transition-colors flex items-center gap-1"
                 >
                   <Database size={10} />
                   {isCachingAll ? `Caching ${cacheProgress}%` : "Cache"}
                 </button>
-              )}
-              <button onClick={() => auth.signOut()} className="hover:text-red-500 transition-colors">Log ud</button>
+                <span className="opacity-30">|</span>
+                <button
+                  onClick={exportToLocalFile}
+                  disabled={isExporting}
+                  className="hover:text-green-500 transition-colors flex items-center gap-1"
+                  title="Gem alle monstre til en lokal fil"
+                >
+                  <Database size={10} className="text-green-500" />
+                  {isExporting ? "Eksporterer..." : "Eksporter til fil"}
+                </button>
+              </div>
+              <button 
+                onClick={() => {
+                  setIsAdmin(false);
+                  localStorage.removeItem("admin-mode");
+                }} 
+                className="hover:text-red-500 transition-colors"
+              >
+                Log ud
+              </button>
             </span>
           ) : (
-            <button onClick={signIn} className="hover:text-[var(--accent)] transition-colors opacity-50 hover:opacity-100">Admin</button>
+            <span className="opacity-50">v2.0 Local Cache</span>
           )}
         </p>
       </footer>
