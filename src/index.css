@@ -13,11 +13,11 @@
   --color-faerun-accent: #2e7d32;
   --color-faerun-border: #bcaaa4;
 
-  --color-underdark-bg: linear-gradient(135deg, #050510 0%, #1a0a30 50%, #0a0a20 100%);
-  --color-underdark-card: rgba(15, 10, 30, 0.9);
-  --color-underdark-text: #d1c4e9;
-  --color-underdark-accent: #9575cd;
-  --color-underdark-border: #311b92;
+  --color-underdark-bg: linear-gradient(135deg, #05050a 0%, #0a0a1a 50%, #05050a 100%);
+  --color-underdark-card: rgba(10, 10, 20, 0.95);
+  --color-underdark-text: #b2ebf2;
+  --color-underdark-accent: #00bcd4;
+  --color-underdark-border: #006064;
 
   --color-feywild-bg: linear-gradient(135deg, #e8f5e9 0%, #fce4ec 100%);
   --color-feywild-card: #ffffff;
@@ -31,17 +31,23 @@
   --color-shadowfell-accent: #424242;
   --color-shadowfell-border: #000000;
 
-  --color-nine-hells-bg: linear-gradient(135deg, #4b0000 0%, #8b0000 50%, #2b0000 100%);
-  --color-nine-hells-card: rgba(43, 0, 0, 0.8);
-  --color-nine-hells-text: #ff4d4d;
-  --color-nine-hells-accent: #ff0000;
-  --color-nine-hells-border: #660000;
+  --color-nine-hells-bg: linear-gradient(135deg, #0f0505 0%, #2d0a0a 50%, #0f0505 100%);
+  --color-nine-hells-card: rgba(15, 5, 5, 0.95);
+  --color-nine-hells-text: #ffe0b2;
+  --color-nine-hells-accent: #ff6f00;
+  --color-nine-hells-border: #bf360c;
 
   --color-mount-celestia-bg: linear-gradient(135deg, #fffde7 0%, #ffffff 50%, #e3f2fd 100%);
   --color-mount-celestia-card: rgba(255, 255, 255, 0.95);
   --color-mount-celestia-text: #5d4037;
   --color-mount-celestia-accent: #fbc02d;
   --color-mount-celestia-border: #fff9c4;
+
+  --color-cormanthor-bg: linear-gradient(135deg, #1b3022 0%, #2e4d3a 50%, #1b3022 100%);
+  --color-cormanthor-card: rgba(27, 48, 34, 0.95);
+  --color-cormanthor-text: #e8f5e9;
+  --color-cormanthor-accent: #81c784;
+  --color-cormanthor-border: #388e3c;
 }
 
 body {
@@ -73,35 +79,30 @@ body {
   --text: var(--color-underdark-text);
   --accent: var(--color-underdark-accent);
   --border: var(--color-underdark-border);
-  text-shadow: 0 0 8px rgba(149, 117, 205, 0.3);
+  text-shadow: 0 0 8px rgba(0, 188, 212, 0.2);
 }
 
 .theme-underdark .monster-info-popup {
-  box-shadow: 0 0 30px rgba(149, 117, 205, 0.4);
+  box-shadow: 0 0 30px rgba(0, 188, 212, 0.3);
   border-color: var(--accent) !important;
 }
 
 .theme-underdark .monster-info-content h1,
 .theme-underdark .monster-info-content .red,
 .theme-underdark .monster-info-content .rub {
-  color: #b39ddb !important;
-  text-shadow: 0 0 12px rgba(179, 157, 219, 0.6);
+  color: #4dd0e1 !important;
+  text-shadow: 0 0 12px rgba(77, 208, 225, 0.4);
 }
 
-.theme-underdark .monster-stat-table {
-  background-color: #1a1a2e !important;
-  border-color: #311b92 !important;
-}
+/* Removed container overrides to maintain original style */
 
 .theme-underdark .monster-stat-table th,
 .theme-underdark .monster-stat-table td {
-  background-color: #0d0d1a !important;
-  color: #d1c4e9 !important;
-  border-color: #311b92 !important;
+  color: #006064 !important;
 }
 
 .theme-underdark .monster-stat-table .stat-header {
-  background-color: #311b92 !important;
+  background-color: #006064 !important;
   color: #ffffff !important;
 }
 
@@ -124,9 +125,34 @@ body {
 .theme-nine-hells {
   --bg: var(--color-nine-hells-bg);
   --card: var(--color-nine-hells-card);
-  --text: #ffcccc;
+  --text: var(--color-nine-hells-text);
   --accent: var(--color-nine-hells-accent);
   --border: var(--color-nine-hells-border);
+  text-shadow: 0 0 5px rgba(255, 111, 0, 0.2);
+}
+
+.theme-nine-hells .monster-info-popup {
+  box-shadow: 0 0 30px rgba(255, 61, 0, 0.3);
+  border-color: var(--accent) !important;
+}
+
+.theme-nine-hells .monster-info-content h1,
+.theme-nine-hells .monster-info-content .red,
+.theme-nine-hells .monster-info-content .rub {
+  color: #ff8a65 !important;
+  text-shadow: 0 0 10px rgba(255, 138, 101, 0.4);
+}
+
+/* Removed container overrides to maintain original style */
+
+.theme-nine-hells .monster-stat-table th,
+.theme-nine-hells .monster-stat-table td {
+  color: #bf360c !important;
+}
+
+.theme-nine-hells .monster-stat-table .stat-header {
+  background-color: #bf360c !important;
+  color: #ffffff !important;
 }
 
 .theme-mount-celestia {
@@ -148,6 +174,39 @@ body {
 .theme-mount-celestia .monster-info-content .rub {
   color: #fbc02d !important;
   text-shadow: 0 0 8px rgba(251, 192, 45, 0.4);
+}
+
+.theme-cormanthor {
+  --bg: var(--color-cormanthor-bg);
+  --card: var(--color-cormanthor-card);
+  --text: var(--color-cormanthor-text);
+  --accent: var(--color-cormanthor-accent);
+  --border: var(--color-cormanthor-border);
+  text-shadow: 0 0 5px rgba(129, 199, 132, 0.2);
+}
+
+.theme-cormanthor .monster-info-popup {
+  box-shadow: 0 0 30px rgba(56, 142, 60, 0.3);
+  border-color: var(--accent) !important;
+}
+
+.theme-cormanthor .monster-info-content h1,
+.theme-cormanthor .monster-info-content .red,
+.theme-cormanthor .monster-info-content .rub {
+  color: #a5d6a7 !important;
+  text-shadow: 0 0 10px rgba(165, 214, 167, 0.4);
+}
+
+/* Removed container overrides to maintain original style */
+
+.theme-cormanthor .monster-stat-table th,
+.theme-cormanthor .monster-stat-table td {
+  color: #1b3022 !important;
+}
+
+.theme-cormanthor .monster-stat-table .stat-header {
+  background-color: #388e3c !important;
+  color: #ffffff !important;
 }
 
 /* Remove initiative spin buttons */

@@ -13,65 +13,20 @@ async function startServer() {
 
   app.use(express.json({ limit: '50mb' }));
 
-  // API Route to get monster data (checks local cache first, then fetches from aidedd)
+  // API Route to proxy monster data from aidedd (avoids CORS)
   app.get("/api/monster/:slug", async (req, res) => {
     const { slug } = req.params;
-    const filePath = path.join(__dirname, "public", "monsters.json");
     
     try {
-      let monsters: Record<string, string> = {};
-      if (fs.existsSync(filePath)) {
-        monsters = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-      }
-
-      if (monsters[slug]) {
-        return res.json({ source: "cache", html: monsters[slug] });
-      }
-
-      // If not in cache, fetch from aidedd (server-side fetch avoids CORS)
       const url = `https://www.aidedd.org/monster/${slug}`;
       const response = await fetch(url);
       if (!response.ok) throw new Error(`Aidedd returned ${response.status}`);
       
       const html = await response.text();
-      res.json({ source: "remote", html });
+      res.json({ html });
     } catch (error) {
       console.error(`Error fetching monster ${slug}:`, error);
       res.status(500).json({ error: "Failed to fetch monster" });
-    }
-  });
-
-  // API Route to save a single processed monster to the local cache
-  app.post("/api/save-monster", (req, res) => {
-    try {
-      const { slug, html } = req.body;
-      const filePath = path.join(__dirname, "public", "monsters.json");
-      
-      let monsters: Record<string, string> = {};
-      if (fs.existsSync(filePath)) {
-        monsters = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-      }
-
-      monsters[slug] = html;
-      fs.writeFileSync(filePath, JSON.stringify(monsters, null, 2));
-      res.json({ success: true });
-    } catch (error) {
-      console.error("Error saving monster:", error);
-      res.status(500).json({ error: "Failed to save monster" });
-    }
-  });
-
-  // API Route to save all monster data (legacy support)
-  app.post("/api/save-monsters", (req, res) => {
-    try {
-      const monsters = req.body;
-      const filePath = path.join(__dirname, "public", "monsters.json");
-      fs.writeFileSync(filePath, JSON.stringify(monsters, null, 2));
-      console.log(`Successfully saved ${Object.keys(monsters).length} monsters to ${filePath}`);
-      res.json({ success: true, count: Object.keys(monsters).length });
-    } catch (error) {
-      console.error("Error saving monsters:", error);
-      res.status(500).json({ error: "Failed to save monsters" });
     }
   });
 

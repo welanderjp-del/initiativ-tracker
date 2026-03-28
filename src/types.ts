@@ -12,7 +12,7 @@ export interface TrackerRow {
   monsterSlug?: string;
 }
 
-export type Theme = "surface" | "faerun" | "underdark" | "feywild" | "shadowfell" | "nine-hells" | "mount-celestia";
+export type Theme = "surface" | "faerun" | "underdark" | "feywild" | "shadowfell" | "nine-hells" | "mount-celestia" | "cormanthor";
 
 export interface AppState {
   rows: TrackerRow[];
