@@ -1,34 +1,53 @@
 @import "tailwindcss";
 
 @theme {
-  --color-surface-bg: #f0f7ff; /* Airy sky blue */
+  --color-surface-bg: linear-gradient(135deg, #f0f7ff 0%, #e0f2fe 100%);
   --color-surface-card: #ffffff;
   --color-surface-text: #1a3a5a;
   --color-surface-accent: #3b82f6;
   --color-surface-border: #d1e9ff;
 
-  --color-underdark-bg: #1a1a2e;
-  --color-underdark-card: #16213e;
-  --color-underdark-text: #e94560;
-  --color-underdark-accent: #0f3460;
-  --color-underdark-border: #4e342e;
+  --color-faerun-bg: linear-gradient(135deg, #f5e6d3 0%, #e8d5b5 100%);
+  --color-faerun-card: #fffcf5;
+  --color-faerun-text: #3e2723;
+  --color-faerun-accent: #2e7d32;
+  --color-faerun-border: #bcaaa4;
 
-  --color-feywild-bg: #f1f8e9;
+  --color-underdark-bg: linear-gradient(135deg, #050510 0%, #1a0a30 50%, #0a0a20 100%);
+  --color-underdark-card: rgba(15, 10, 30, 0.9);
+  --color-underdark-text: #d1c4e9;
+  --color-underdark-accent: #9575cd;
+  --color-underdark-border: #311b92;
+
+  --color-feywild-bg: linear-gradient(135deg, #e8f5e9 0%, #fce4ec 100%);
   --color-feywild-card: #ffffff;
   --color-feywild-text: #2e7d32;
-  --color-feywild-accent: #8bc34a;
-  --color-feywild-border: #c5e1a5;
+  --color-feywild-accent: #ec407a;
+  --color-feywild-border: #f8bbd0;
 
-  --color-shadowfell-bg: #212121;
-  --color-shadowfell-card: #424242;
-  --color-shadowfell-text: #bdbdbd;
-  --color-shadowfell-accent: #616161;
+  --color-shadowfell-bg: linear-gradient(135deg, #121212 0%, #2c3e50 100%);
+  --color-shadowfell-card: #1e1e1e;
+  --color-shadowfell-text: #9e9e9e;
+  --color-shadowfell-accent: #424242;
   --color-shadowfell-border: #000000;
+
+  --color-nine-hells-bg: linear-gradient(135deg, #4b0000 0%, #8b0000 50%, #2b0000 100%);
+  --color-nine-hells-card: rgba(43, 0, 0, 0.8);
+  --color-nine-hells-text: #ff4d4d;
+  --color-nine-hells-accent: #ff0000;
+  --color-nine-hells-border: #660000;
+
+  --color-mount-celestia-bg: linear-gradient(135deg, #fffde7 0%, #ffffff 50%, #e3f2fd 100%);
+  --color-mount-celestia-card: rgba(255, 255, 255, 0.95);
+  --color-mount-celestia-text: #5d4037;
+  --color-mount-celestia-accent: #fbc02d;
+  --color-mount-celestia-border: #fff9c4;
 }
 
 body {
   @apply transition-colors duration-300 min-h-screen;
-  background-color: var(--bg);
+  background: var(--bg);
+  background-attachment: fixed;
   color: var(--text);
 }
 
@@ -40,19 +59,57 @@ body {
   --border: var(--color-surface-border);
 }
 
+.theme-faerun {
+  --bg: var(--color-faerun-bg);
+  --card: var(--color-faerun-card);
+  --text: var(--color-faerun-text);
+  --accent: var(--color-faerun-accent);
+  --border: var(--color-faerun-border);
+}
+
 .theme-underdark {
   --bg: var(--color-underdark-bg);
   --card: var(--color-underdark-card);
-  --text: #ffffff;
-  --accent: var(--color-underdark-text);
-  --border: #333;
+  --text: var(--color-underdark-text);
+  --accent: var(--color-underdark-accent);
+  --border: var(--color-underdark-border);
+  text-shadow: 0 0 8px rgba(149, 117, 205, 0.3);
+}
+
+.theme-underdark .monster-info-popup {
+  box-shadow: 0 0 30px rgba(149, 117, 205, 0.4);
+  border-color: var(--accent) !important;
+}
+
+.theme-underdark .monster-info-content h1,
+.theme-underdark .monster-info-content .red,
+.theme-underdark .monster-info-content .rub {
+  color: #b39ddb !important;
+  text-shadow: 0 0 12px rgba(179, 157, 219, 0.6);
+}
+
+.theme-underdark .monster-stat-table {
+  background-color: #1a1a2e !important;
+  border-color: #311b92 !important;
+}
+
+.theme-underdark .monster-stat-table th,
+.theme-underdark .monster-stat-table td {
+  background-color: #0d0d1a !important;
+  color: #d1c4e9 !important;
+  border-color: #311b92 !important;
+}
+
+.theme-underdark .monster-stat-table .stat-header {
+  background-color: #311b92 !important;
+  color: #ffffff !important;
 }
 
 .theme-feywild {
   --bg: var(--color-feywild-bg);
   --card: var(--color-feywild-card);
   --text: var(--color-feywild-text);
-  --accent: #4caf50;
+  --accent: var(--color-feywild-accent);
   --border: var(--color-feywild-border);
 }
 
@@ -60,8 +117,37 @@ body {
   --bg: var(--color-shadowfell-bg);
   --card: var(--color-shadowfell-card);
   --text: var(--color-shadowfell-text);
-  --accent: #757575;
+  --accent: var(--color-shadowfell-accent);
   --border: var(--color-shadowfell-border);
+}
+
+.theme-nine-hells {
+  --bg: var(--color-nine-hells-bg);
+  --card: var(--color-nine-hells-card);
+  --text: #ffcccc;
+  --accent: var(--color-nine-hells-accent);
+  --border: var(--color-nine-hells-border);
+}
+
+.theme-mount-celestia {
+  --bg: var(--color-mount-celestia-bg);
+  --card: var(--color-mount-celestia-card);
+  --text: var(--color-mount-celestia-text);
+  --accent: var(--color-mount-celestia-accent);
+  --border: var(--color-mount-celestia-border);
+  text-shadow: 0 0 5px rgba(251, 192, 45, 0.2);
+}
+
+.theme-mount-celestia .monster-info-popup {
+  box-shadow: 0 0 25px rgba(255, 214, 0, 0.3);
+  border-color: #ffd600 !important;
+}
+
+.theme-mount-celestia .monster-info-content h1,
+.theme-mount-celestia .monster-info-content .red,
+.theme-mount-celestia .monster-info-content .rub {
+  color: #fbc02d !important;
+  text-shadow: 0 0 8px rgba(251, 192, 45, 0.4);
 }
 
 /* Remove initiative spin buttons */
@@ -77,41 +163,40 @@ body {
 /* Monster Info Popup Styling */
 .monster-info-popup {
   @apply fixed z-[100] p-6 rounded-xl shadow-2xl border-2;
-  background-color: #fdf1dc; /* Classic D&D paper color */
-  border-color: #9c2b1b;
-  color: #333;
+  background: var(--card);
+  backdrop-filter: blur(10px);
+  border-color: var(--accent);
+  color: var(--text);
   font-family: 'Georgia', serif;
   overflow-y: auto;
   overflow-x: hidden !important;
 }
 
 .monster-info-content {
+  overflow: visible;
+  height: auto !important;
+  @apply leading-normal;
   column-width: 350px;
-  column-gap: 2.5rem;
+  column-gap: 1.5rem;
   column-rule: 1px solid rgba(156, 43, 27, 0.2);
   text-align: justify;
   column-fill: balance;
-  overflow: visible;
-  height: auto !important;
 }
 
 /* Ensure sections don't break across columns weirdly */
 .monster-info-content p, 
 .monster-info-content .rub, 
 .monster-info-content .car-block,
+.monster-info-content .monster-stat-wrapper,
 .monster-info-content table {
   break-inside: avoid;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.25rem;
 }
 
 .monster-info-content h1 {
-  column-span: all;
-  margin-bottom: 1rem;
+  margin-bottom: 0.5rem;
 }
 
-.monster-info-popup .jaune {
-  @apply leading-relaxed;
-}
 
 .monster-info-popup h1 {
   @apply text-3xl font-bold mb-0 uppercase tracking-tighter;
@@ -119,10 +204,9 @@ body {
   border-bottom: 2px solid #9c2b1b;
 }
 
-.monster-info-popup .type {
-  @apply italic text-sm mb-2;
+.monster-info-content .type {
+  @apply italic text-sm mb-1;
   color: #555;
-  column-span: all;
 }
 
 .monster-info-popup .red {
@@ -130,18 +214,16 @@ body {
 }
 
 .monster-info-popup .rub {
-  @apply text-xl font-bold mt-4 mb-1 border-b uppercase;
+  @apply text-xl font-bold mt-2 mb-1 border-b uppercase;
   color: #9c2b1b;
   border-color: #9c2b1b;
 }
 
 /* Fix for actual tables in the content */
 .monster-info-popup table {
-  display: block;
   width: 100%;
-  overflow-x: auto;
   border-collapse: collapse;
-  margin: 1rem 0;
+  margin: 0.5rem 0;
   font-size: 0.9em;
   line-height: 1.2;
 }
@@ -158,116 +240,74 @@ body {
   border-bottom: 1px solid rgba(0,0,0,0.05);
 }
 
-/* Stats Grid Simulation - Matching the uploaded image style */
-.monster-info-popup .car-block-grid,
-.monster-info-popup .car-block-grid-simple {
-  display: grid !important;
-  grid-template-columns: repeat(12, 1fr) !important;
-  grid-auto-flow: row !important;
+/* Stats Wrapper for column-span */
+.monster-info-popup .monster-stat-wrapper {
   width: 100% !important;
-  min-width: 450px !important;
-  margin: 1rem auto !important;
-  gap: 1px !important;
+  margin: 0.5rem 0 !important;
+  padding: 0 !important;
+  break-inside: avoid !important;
+  display: block !important;
+}
+
+/* Stats Table Styling */
+.monster-info-popup .monster-stat-table {
+  display: table !important;
+  width: 100% !important;
+  border-collapse: collapse !important;
   background-color: #d9d4cc !important;
   border: 1px solid #d9d4cc !important;
-  break-inside: avoid !important;
-  column-span: all !important;
-  box-sizing: border-box !important;
-  overflow: visible !important;
-  float: none !important;
-  clear: both !important;
+  table-layout: fixed !important;
+  border-radius: 4px !important;
+  overflow: hidden !important;
+  margin: 0 !important;
 }
 
-.monster-info-popup .car-block-grid-simple {
-  grid-template-columns: repeat(6, 1fr) !important;
-  min-width: 300px !important;
+.monster-info-popup .monster-stat-table tr {
+  display: table-row !important;
 }
 
-.monster-info-popup .car-block-grid > div,
-.monster-info-popup .car-block-grid-simple > div {
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  padding: 4px 2px !important;
-  font-size: 11px !important;
-  font-weight: bold !important;
-  min-height: 32px !important;
-  color: #9c2b1b !important;
-  text-transform: uppercase !important;
+.monster-info-popup .monster-stat-table th,
+.monster-info-popup .monster-stat-table td {
+  display: table-cell !important;
+  padding: 6px 2px !important;
   text-align: center !important;
-  background-color: #e9e7e1 !important;
-  width: auto !important;
-  min-width: 0 !important;
-  box-sizing: border-box !important;
-  flex-direction: column !important;
+  font-size: 12px !important;
+  background-color: #fff !important;
+  border: 1px solid #d9d4cc !important;
+  width: 8.33% !important; /* 1/12th */
+  vertical-align: middle !important;
 }
 
-/* Row 1 Headers (MOD, SAVE) */
-.monster-info-popup .car-block-grid > div:nth-child(n+1):nth-child(-n+12) {
-  font-size: 9px !important;
-  opacity: 0.8;
-  min-height: 24px !important;
+.monster-info-popup .monster-stat-table .stat-header {
+  color: #9c2b1b !important;
+  font-weight: bold !important;
+  font-size: 10px !important;
+  background-color: #d9d4cc !important;
+  text-transform: uppercase !important;
 }
 
-/* Every 2nd column in a 4-column block (the Score column) should be gray */
-.monster-info-popup .car-block-grid > div:nth-child(4n+2) {
-  background-color: #f2f1ed !important;
-}
-
-/* Blank header cells in Row 1 should be white or transparent if they are not the score column */
-.monster-info-popup .car-block-grid > div:nth-child(1),
-.monster-info-popup .car-block-grid > div:nth-child(5),
-.monster-info-popup .car-block-grid > div:nth-child(9) {
-  background-color: #e9e7e1 !important;
-}
-
-/* Ensure the blank cells in Row 1 that are in the score column are also gray */
-.monster-info-popup .car-block-grid > div:nth-child(2),
-.monster-info-popup .car-block-grid > div:nth-child(6),
-.monster-info-popup .car-block-grid > div:nth-child(10) {
-  background-color: #f2f1ed !important;
-}
-
-/* Handle "MOD" and "SAVE" headers if they are separate items */
-.monster-info-popup .car-block > div:empty {
-  background-color: transparent !important;
+.monster-info-popup .monster-stat-table .stat-header-empty {
+  background-color: #d9d4cc !important;
   border: none !important;
 }
 
-.monster-info-popup .car, 
-.monster-info-popup .car1, 
-.monster-info-popup .car2, 
-.monster-info-popup .car3, 
-.monster-info-popup .car4, 
-.monster-info-popup .car5, 
-.monster-info-popup .car6 {
-  /* Reset some styles if they were applied elsewhere */
-  @apply flex items-center justify-center p-1 text-[11px] font-bold;
-  min-height: 32px;
-  color: #7a0303;
-  text-transform: uppercase;
-  text-align: center;
+.monster-info-popup .monster-stat-table .stat-label {
+  font-weight: bold !important;
+  color: #9c2b1b !important;
+  background-color: #f2f2f2 !important;
 }
 
-.monster-info-popup .car2, 
-.monster-info-popup .car4, 
-.monster-info-popup .car6 {
-  background-color: #f2f1ed;
+.monster-info-popup .monster-stat-table .stat-score {
+  font-weight: bold !important;
+  font-size: 13px !important;
 }
 
-/* Specific styling for Score/Mod values */
-.monster-info-popup .car2, 
-.monster-info-popup .car4, 
-.monster-info-popup .car6 {
-  font-size: 13px;
+.monster-info-popup .monster-stat-table .stat-mod,
+.monster-info-popup .monster-stat-table .stat-save {
+  font-size: 11px !important;
 }
 
-/* Handle headers if they are in the first row */
-.monster-info-popup .car-block > div:nth-child(-n+12) {
-  font-size: 10px;
-  opacity: 0.7;
-  min-height: 24px;
-}
+
 
 /* Responsive: Single column on small screens */
 @media (max-width: 1000px) {

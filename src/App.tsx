@@ -13,11 +13,17 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>("surface");
   const [resetConfirm, setResetConfirm] = useState(false);
   const [hoveredMonster, setHoveredMonster] = useState<{ slug: string; x: number; y: number } | null>(null);
-  const [isLoadingInfo, setIsLoadingInfo] = useState(false);
+  const [loadingSlugs, setLoadingSlugs] = useState<Set<string>>(new Set());
   const [activeDropdownId, setActiveDropdownId] = useState<string | null>(null);
   const [monsterCache, setMonsterCache] = useState<Record<string, string>>({});
   const [isHoveringPopup, setIsHoveringPopup] = useState(false);
+  const isHoveringPopupRef = useRef(false);
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Sync ref with state
+  useEffect(() => {
+    isHoveringPopupRef.current = isHoveringPopup;
+  }, [isHoveringPopup]);
 
   // Apply theme to body
   useEffect(() => {
@@ -126,9 +132,234 @@ export default function App() {
     }
   };
 
+  const processJaune = (jaune: Element) => {
+    const statLabelsMap: { [key: string]: string } = {
+      "STR": "STR", "FOR": "STR",
+      "DEX": "DEX",
+      "CON": "CON",
+      "INT": "INT",
+      "WIS": "WIS", "SAG": "WIS",
+      "CHA": "CHA"
+    };
+    const statLabels = Object.keys(statLabelsMap);
+
+    // Remove loose MOD/SAVE headers that often appear in aidedd.org blocks
+    jaune.querySelectorAll('div, b, span, td, p').forEach(el => {
+      const t = el.textContent?.trim().toUpperCase();
+      if (t === 'MOD' || t === 'SAVE') {
+        el.remove();
+      }
+    });
+
+    // Find all potential stat blocks
+    let carBlocks = Array.from(jaune.querySelectorAll('[class*="car-block"], [class*="car_block"]'));
+    
+    // If no car-block container, look for the loose .car elements
+    if (carBlocks.length === 0) {
+      const looseStats = Array.from(jaune.querySelectorAll('.car, .car1, .car2, .car3, .car4, .car5, .car6'));
+      if (looseStats.length >= 6) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'car-block';
+        const first = looseStats[0];
+        const parent = first.parentElement;
+        if (parent) {
+          parent.insertBefore(wrapper, first);
+          // Move all found loose stats into the wrapper
+          looseStats.forEach(stat => wrapper.appendChild(stat));
+          carBlocks = [wrapper];
+        }
+      }
+    }
+
+    // Fallback: if still no car-block class, look for a div containing a stat label
+    if (carBlocks.length === 0) {
+      const allElements = Array.from(jaune.querySelectorAll('div, b, span, td, p'));
+      const firstStatEl = allElements.find(d => {
+        const t = d.textContent?.trim().toUpperCase() || "";
+        return statLabels.includes(t);
+      });
+      
+      if (firstStatEl && firstStatEl.parentElement) {
+        // Try to find a common parent that contains most stats, but stay inside jaune
+        let bestParent = firstStatEl.parentElement;
+        while (bestParent && bestParent.parentElement && bestParent.parentElement !== jaune && 
+               bestParent.textContent && 
+               statLabels.filter(l => bestParent.textContent!.toUpperCase().includes(l)).length < 4) {
+          bestParent = bestParent.parentElement as HTMLElement;
+        }
+        if (bestParent && bestParent !== jaune) carBlocks = [bestParent];
+      }
+    }
+
+    carBlocks.forEach(carBlock => {
+      // Flatten all text content from the block
+      const flattenedTexts: string[] = [];
+      const extract = (el: Node) => {
+        if (el.nodeType === Node.TEXT_NODE) {
+          const t = el.textContent?.trim();
+          if (t) flattenedTexts.push(t);
+        } else if (el.nodeType === Node.ELEMENT_NODE) {
+          const element = el as Element;
+          // If it's a script or style, skip
+          if (element.tagName === 'SCRIPT' || element.tagName === 'STYLE') return;
+          
+          if (element.children.length === 0) {
+            const t = element.textContent?.trim();
+            if (t) flattenedTexts.push(t);
+          } else {
+            Array.from(element.childNodes).forEach(extract);
+          }
+        }
+      };
+      extract(carBlock);
+      
+      const filteredTexts = flattenedTexts.filter(t => {
+        const ut = t.toUpperCase();
+        return ut !== 'MOD' && ut !== 'SAVE' && ut !== '';
+      });
+      
+      const stats: { label: string, score: string, mod: string, save: string }[] = [];
+      let currentStat: any = null;
+
+      filteredTexts.forEach(text => {
+        const upper = text.toUpperCase();
+        if (statLabels.includes(upper)) {
+          if (currentStat) {
+            if (currentStat.mod && !currentStat.save) currentStat.save = currentStat.mod;
+            stats.push(currentStat);
+          }
+          currentStat = { label: statLabelsMap[upper], score: "", mod: "", save: "" };
+        } else if (currentStat) {
+          const fullMatch = text.match(/^(\d+)\s*\(([-+]\d+)\)$/);
+          if (fullMatch) {
+            currentStat.score = fullMatch[1];
+            currentStat.mod = fullMatch[2];
+            currentStat.save = fullMatch[2];
+          } else {
+            const scoreMatch = text.match(/^\d+$/);
+            const modMatch = text.match(/^[-+]\d+$/);
+            if (scoreMatch && !currentStat.score) {
+              currentStat.score = text;
+            } else if (modMatch) {
+              if (!currentStat.mod) currentStat.mod = text;
+              else if (!currentStat.save) currentStat.save = text;
+            }
+          }
+        }
+      });
+      if (currentStat) {
+        if (currentStat.mod && !currentStat.save) currentStat.save = currentStat.mod;
+        stats.push(currentStat);
+      }
+
+      // We should have 6 stats for a full table, but let's render whatever we find
+      if (stats.length > 0) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'monster-stat-wrapper';
+        
+        let tableHtml = `<table class="monster-stat-table">`;
+        
+        // Headers Row
+        tableHtml += `<tr>`;
+        for (let i = 0; i < 3; i++) {
+          tableHtml += `<th class="stat-header-empty"></th><th class="stat-header-empty"></th><th class="stat-header">MOD</th><th class="stat-header">SAVE</th>`;
+        }
+        tableHtml += `</tr>`;
+        
+        // Data Rows
+        for (let row = 0; row < Math.ceil(stats.length / 3); row++) {
+          tableHtml += `<tr>`;
+          for (let col = 0; col < 3; col++) {
+            const i = row * 3 + col;
+            if (i < stats.length) {
+              const s = stats[i];
+              tableHtml += `
+                <td class="stat-label">${s.label}</td>
+                <td class="stat-score">${s.score}</td>
+                <td class="stat-mod">${s.mod || "+0"}</td>
+                <td class="stat-save">${s.save || s.mod || "+0"}</td>
+              `;
+            } else if (row === 0) {
+               // Fill empty cells if first row is not full
+               tableHtml += `<td colspan="4"></td>`;
+            }
+          }
+          tableHtml += `</tr>`;
+        }
+        
+        tableHtml += `</table>`;
+        wrapper.innerHTML = tableHtml;
+        
+        // Final safety check: if carBlock is jaune, don't replace it, replace its children
+        if (carBlock === jaune) {
+          // This case should be avoided by the fallback logic, but just in case:
+          // We find the first and last stat elements and replace that range
+          const first = Array.from(jaune.querySelectorAll('*')).find(el => statLabels.includes(el.textContent?.trim().toUpperCase() || ""));
+          if (first && first.parentElement) {
+             first.parentElement.insertBefore(wrapper, first);
+             // We can't easily remove the others without knowing where they end, 
+             // but at least the table will be there.
+          }
+        } else {
+          carBlock.replaceWith(wrapper);
+        }
+      }
+    });
+
+    // FINAL AGGRESSIVE CLEANUP: Remove all empty nodes and redundant line breaks
+    const cleanNodes = (root: Element) => {
+      // First, remove any BR tags that are immediately after the stat table wrapper
+      const wrappers = root.querySelectorAll('.monster-stat-wrapper');
+      wrappers.forEach(w => {
+        let next = w.nextSibling;
+        while (next && (next.nodeName === 'BR' || (next.nodeType === Node.TEXT_NODE && !next.textContent?.trim()))) {
+          const toRemove = next;
+          next = next.nextSibling;
+          toRemove.remove();
+        }
+      });
+
+      const all = Array.from(root.querySelectorAll('*'));
+      // Process backwards to handle nested empty elements
+      all.reverse().forEach(el => {
+        if (el.classList.contains('monster-stat-wrapper')) return;
+        if (el.querySelector('img, table, iframe, .monster-stat-wrapper, canvas, svg')) return;
+        
+        // Handle non-breaking spaces and other whitespace
+        const text = el.textContent?.replace(/\u00a0/g, ' ').trim();
+        if (!text && !['BR', 'HR', 'IMG', 'IFRAME', 'CANVAS', 'SVG', 'TH', 'TD'].includes(el.tagName)) {
+          el.remove();
+        }
+      });
+
+      // Remove redundant BRs and BRs at start/end of containers
+      root.querySelectorAll('br').forEach(br => {
+        const next = br.nextSibling;
+        
+        // Remove if it's followed by another BR or if it's the last child
+        if (!next || next.nodeName === 'BR' || (next.nodeType === Node.ELEMENT_NODE && (next as Element).tagName === 'BR')) {
+          br.remove();
+        }
+      });
+      
+      // Remove BRs at the very beginning
+      while (root.firstChild && root.firstChild.nodeName === 'BR') {
+        root.removeChild(root.firstChild);
+      }
+    };
+    cleanNodes(jaune);
+  };
+
+  useEffect(() => {
+    if (!hoveredMonster) {
+      isHoveringPopupRef.current = false;
+      setIsHoveringPopup(false);
+    }
+  }, [hoveredMonster]);
+
   const fetchMonsterInfo = async (slug: string) => {
-    if (monsterCache[slug]) return;
-    setIsLoadingInfo(true);
+    if (monsterCache[slug] || loadingSlugs.has(slug)) return;
+    setLoadingSlugs(prev => new Set(prev).add(slug));
     try {
       // Try corsproxy.io first as it's often more reliable
       const url = `https://www.aidedd.org/monster/${slug}`;
@@ -143,90 +374,7 @@ export default function App() {
       const jaune = doc.querySelector(".jaune");
       
       if (jaune) {
-        // Find all potential stat blocks
-        let carBlocks = Array.from(jaune.querySelectorAll('[class*="car-block"], [class*="car_block"]'));
-        
-        // Fallback: if no car-block class, look for a div containing "STR"
-        if (carBlocks.length === 0) {
-          const allDivs = Array.from(jaune.querySelectorAll('div'));
-          const strDiv = allDivs.find(d => d.textContent?.trim() === 'STR');
-          if (strDiv && strDiv.parentElement) {
-            carBlocks = [strDiv.parentElement];
-          }
-        }
-
-        carBlocks.forEach(carBlock => {
-          let stats = Array.from(carBlock.children);
-          
-          // Normalize if possible (12 elements = Label + Score(+Mod), 18 = Label + Score + Mod)
-          if (stats.length === 12 || stats.length === 18) {
-            const newStats: Element[] = [];
-            const step = stats.length / 6;
-            for (let i = 0; i < stats.length; i += step) {
-              const label = stats[i];
-              const value = stats[i+1];
-              if (!label || !value) continue;
-              
-              newStats.push(label);
-              const text = value.textContent?.trim() || "";
-              const match = text.match(/^(\d+)\s*\(([-+]\d+)\)$/);
-              
-              if (match) {
-                const score = document.createElement('div');
-                score.textContent = match[1];
-                const mod = document.createElement('div');
-                mod.textContent = match[2];
-                const save = document.createElement('div');
-                save.textContent = match[2];
-                newStats.push(score, mod, save);
-              } else {
-                const parts = text.split(/\s+/);
-                const score = document.createElement('div');
-                score.textContent = parts[0] || "10";
-                const mod = document.createElement('div');
-                mod.textContent = parts[1]?.replace(/[()]/g, '') || "+0";
-                const save = document.createElement('div');
-                save.textContent = mod.textContent;
-                newStats.push(score, mod, save);
-              }
-            }
-            stats = newStats;
-          }
-          
-          const newGrid = document.createElement('div');
-          
-          if (stats.length >= 24) {
-            newGrid.className = 'car-block-grid';
-            
-            // Row 1: Headers
-            for (let i = 0; i < 3; i++) {
-              const b1 = document.createElement('div');
-              const b2 = document.createElement('div');
-              const mod = document.createElement('div');
-              mod.textContent = 'MOD';
-              const save = document.createElement('div');
-              save.textContent = 'SAVE';
-              newGrid.appendChild(b1);
-              newGrid.appendChild(b2);
-              newGrid.appendChild(mod);
-              newGrid.appendChild(save);
-            }
-            
-            // Row 2: STR, DEX, CON
-            for (let i = 0; i < 12; i++) {
-              newGrid.appendChild(stats[i]);
-            }
-            
-            // Row 3: INT, WIS, CHA
-            for (let i = 12; i < 24; i++) {
-              newGrid.appendChild(stats[i]);
-            }
-          } else {
-            newGrid.className = 'car-block-grid-simple';
-            stats.forEach(s => newGrid.appendChild(s));
-          }
-          carBlock.replaceWith(newGrid);
-        });
+        processJaune(jaune);
         setMonsterCache(prev => ({ ...prev, [slug]: jaune.innerHTML }));
       } else {
         // Fallback to allorigins if first one fails to find content
@@ -244,7 +392,10 @@ export default function App() {
         const doc = parser.parseFromString(html, "text/html");
         const jaune = doc.querySelector(".jaune");
         if (jaune) {
+          processJaune(jaune);
           setMonsterCache(prev => ({ ...prev, [slug]: jaune.innerHTML }));
+        } else {
+          throw new Error("Content not found with secondary proxy");
         }
       } catch (fallbackError) {
         console.warn("Second proxy failed, trying third fallback...", fallbackError);
@@ -257,7 +408,10 @@ export default function App() {
           const doc = parser.parseFromString(html, "text/html");
           const jaune = doc.querySelector(".jaune");
           if (jaune) {
+            processJaune(jaune);
             setMonsterCache(prev => ({ ...prev, [slug]: jaune.innerHTML }));
+          } else {
+            setMonsterCache(prev => ({ ...prev, [slug]: "<div class='p-4 text-red-500 font-bold'>Ingen information fundet for dette monster på aidedd.org.</div>" }));
           }
         } catch (thirdError) {
           console.error("All proxies failed:", thirdError);
@@ -265,7 +419,11 @@ export default function App() {
         }
       }
     } finally {
-      setIsLoadingInfo(false);
+      setLoadingSlugs(prev => {
+        const next = new Set(prev);
+        next.delete(slug);
+        return next;
+      });
     }
   };
 
@@ -414,9 +572,12 @@ export default function App() {
             className="p-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
           >
             <option value="surface">Surface</option>
+            <option value="faerun">Faerûn</option>
             <option value="underdark">Underdark</option>
             <option value="feywild">Feywild</option>
             <option value="shadowfell">Shadowfell</option>
+            <option value="nine-hells">The Nine Hells</option>
+            <option value="mount-celestia">Mount Celestia</option>
           </select>
         </div>
       </header>
@@ -477,7 +638,7 @@ export default function App() {
                   }}
                   onMouseLeave={() => {
                     hoverTimeoutRef.current = setTimeout(() => {
-                      if (!isHoveringPopup) setHoveredMonster(null);
+                      if (!isHoveringPopupRef.current) setHoveredMonster(null);
                     }, 150);
                   }}
                 >
@@ -577,7 +738,7 @@ export default function App() {
 
       {/* Monster Info Popup */}
       <AnimatePresence>
-        {(hoveredMonster || isHoveringPopup) && (
+        {hoveredMonster?.slug && (
           <motion.div
             initial={{ opacity: 0, scale: 0.95, x: 10 }}
             animate={{ opacity: 1, scale: 1, x: 0 }}
@@ -586,33 +747,37 @@ export default function App() {
             onMouseEnter={() => {
               if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
               setIsHoveringPopup(true);
+              isHoveringPopupRef.current = true;
             }}
             onMouseLeave={() => {
               setIsHoveringPopup(false);
+              isHoveringPopupRef.current = false;
               setHoveredMonster(null);
             }}
             style={{
               left: (hoveredMonster?.x || 0) + 15,
-              top: (hoveredMonster?.y || 0) < window.innerHeight / 2 ? Math.max(10, (hoveredMonster?.y || 0) - 100) : "auto",
-              bottom: (hoveredMonster?.y || 0) >= window.innerHeight / 2 ? Math.max(10, window.innerHeight - (hoveredMonster?.y || 0) - 100) : "auto",
-              width: (monsterCache[hoveredMonster?.slug || ""]?.length || 0) > 2000 ? "1100px" : (monsterCache[hoveredMonster?.slug || ""]?.length || 0) > 800 ? "750px" : "450px",
-              minWidth: "450px",
-              maxWidth: Math.min(1100, window.innerWidth - (hoveredMonster?.x || 0) - 60),
-              maxHeight: (hoveredMonster?.y || 0) < window.innerHeight / 2 
-                ? `calc(100vh - ${Math.max(10, (hoveredMonster?.y || 0) - 100) + 20}px)` 
-                : `calc(100vh - ${Math.max(10, window.innerHeight - (hoveredMonster?.y || 0) - 100) + 20}px)`,
+              top: 20,
+              bottom: 20,
+              width: "100%",
+              minWidth: "400px",
+              maxWidth: Math.min(
+                (monsterCache[hoveredMonster?.slug || ""]?.length || 0) > 1500 ? 1100 : (monsterCache[hoveredMonster?.slug || ""]?.length || 0) > 600 ? 750 : 400,
+                window.innerWidth - (hoveredMonster?.x || 0) - 60
+              ),
+              maxHeight: "calc(100vh - 40px)",
               overflowX: "auto"
             }}
           >
-            {isLoadingInfo && !monsterCache[hoveredMonster?.slug || ""] ? (
+            {loadingSlugs.has(hoveredMonster?.slug || "") && !monsterCache[hoveredMonster?.slug || ""] ? (
               <div className="flex items-center justify-center p-8">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#9c2b1b]"></div>
+                <span className="ml-3 font-serif">Henter information...</span>
               </div>
             ) : (
               <div 
                 className="monster-info-content"
                 style={{ height: "100%" }}
-                dangerouslySetInnerHTML={{ __html: monsterCache[hoveredMonster?.slug || ""] || "Henter information..." }} 
+                dangerouslySetInnerHTML={{ __html: monsterCache[hoveredMonster?.slug || ""] || (loadingSlugs.has(hoveredMonster?.slug || "") ? "Henter information..." : "Ingen information fundet.") }} 
               />
             )}
           </motion.div>
