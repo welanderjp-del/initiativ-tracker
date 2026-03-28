@@ -538,11 +538,17 @@ export default function App() {
     
     const results: Record<string, string> = { ...fullMonsterData };
     const total = MONSTER_LIST.length;
+    let successCount = 0;
+    let failCount = 0;
+    
+    console.log(`Starting scrape of ${total} monsters...`);
     
     for (let i = 0; i < total; i++) {
       const monster = MONSTER_LIST[i];
+      
       if (results[monster.slug]) {
-        setScrapedCount(prev => prev + 1);
+        successCount++;
+        setScrapedCount(i + 1);
         setScrapeProgress(Math.round(((i + 1) / total) * 100));
         continue;
       }
@@ -551,22 +557,38 @@ export default function App() {
         const response = await fetch(`/api/monster/${monster.slug}`);
         if (response.ok) {
           const data = await response.json();
-          results[monster.slug] = data.html;
+          if (data.html && data.html.length > 100) {
+            results[monster.slug] = data.html;
+            successCount++;
+          } else {
+            console.warn(`Empty or too short HTML for ${monster.slug}`);
+            failCount++;
+          }
+        } else {
+          console.error(`Failed to fetch ${monster.slug}: ${response.status}`);
+          failCount++;
         }
       } catch (e) {
-        console.error(`Failed to scrape ${monster.slug}`, e);
+        console.error(`Error scraping ${monster.slug}:`, e);
+        failCount++;
       }
       
       setScrapedCount(i + 1);
       setScrapeProgress(Math.round(((i + 1) / total) * 100));
       
-      // Small delay to be nice to the server/proxy
-      if (i % 5 === 0) await new Promise(r => setTimeout(r, 100));
+      // Slightly longer delay to avoid rate limiting
+      if (i % 3 === 0) await new Promise(r => setTimeout(r, 200));
     }
     
     setFullMonsterData(results);
     setIsScraping(false);
     
+    const finalCount = Object.keys(results).length;
+    if (finalCount === 0) {
+      alert("Fejl: Ingen monstre blev hentet. Tjek konsollen for detaljer.");
+      return;
+    }
+
     // Trigger download
     const blob = new Blob([JSON.stringify(results, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -578,7 +600,7 @@ export default function App() {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
     
-    alert(`Færdig! ${Object.keys(results).length} monstre er nu gemt i hukommelsen og downloadet.`);
+    alert(`Færdig! ${finalCount} monstre er nu gemt i hukommelsen og downloadet. (${successCount} succes, ${failCount} fejl)`);
   };
 
   const downloadExisting = () => {

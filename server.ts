@@ -20,13 +20,31 @@ async function startServer() {
     const { slug } = req.params;
     
     try {
-      const url = `https://www.aidedd.org/monster/${slug}`;
+      // Try the vo= parameter first as it's more reliable for the stat block content
+      const url = `https://www.aidedd.org/dnd/monstres.php?vo=${slug}`;
       const response = await fetch(url, {
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
       });
-      if (!response.ok) throw new Error(`Aidedd returned ${response.status}`);
+      
+      if (!response.ok) {
+        console.warn(`Aidedd returned ${response.status} for ${slug}`);
+        // Fallback to the direct monster URL if the first one fails
+        const fallbackUrl = `https://www.aidedd.org/monster/${slug}`;
+        const fallbackResponse = await fetch(fallbackUrl, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+          }
+        });
+        
+        if (!fallbackResponse.ok) {
+          throw new Error(`Aidedd returned ${fallbackResponse.status} for fallback ${slug}`);
+        }
+        
+        const html = await fallbackResponse.text();
+        return res.json({ html });
+      }
       
       const html = await response.text();
       res.json({ html });
