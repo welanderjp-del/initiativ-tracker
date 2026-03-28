@@ -20,6 +20,10 @@ export default function App() {
     return saved ? JSON.parse(saved) : {};
   });
   const [isHoveringPopup, setIsHoveringPopup] = useState(false);
+  const [fullMonsterData, setFullMonsterData] = useState<Record<string, string>>({});
+  const [isScraping, setIsScraping] = useState(false);
+  const [scrapeProgress, setScrapeProgress] = useState(0);
+  const [scrapedCount, setScrapedCount] = useState(0);
   const isHoveringPopupRef = useRef(false);
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -40,6 +44,19 @@ export default function App() {
 
   // Load state from localStorage
   useEffect(() => {
+    const loadFullData = async () => {
+      try {
+        const response = await fetch("/monster-data.json");
+        if (response.ok) {
+          const data = await response.json();
+          setFullMonsterData(data);
+        }
+      } catch (e) {
+        console.warn("Local monster-data.json not found or failed to load");
+      }
+    };
+    loadFullData();
+
     const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
     if (saved) {
       try {
@@ -367,6 +384,21 @@ export default function App() {
 
   const fetchMonsterInfo = async (slug: string) => {
     if (monsterCache[slug] || loadingSlugs.has(slug)) return;
+
+    // Check local full data first
+    if (fullMonsterData[slug]) {
+      const html = fullMonsterData[slug];
+      const parser = new DOMParser();
+      const docObj = parser.parseFromString(html, "text/html");
+      const jaune = docObj.querySelector(".jaune") || docObj.body;
+      
+      if (jaune) {
+        processJaune(jaune as HTMLElement);
+        const content = jaune.innerHTML;
+        setMonsterCache(prev => ({ ...prev, [slug]: content }));
+        return;
+      }
+    }
     
     setLoadingSlugs(prev => new Set(prev).add(slug));
     
@@ -496,6 +528,70 @@ export default function App() {
       }
     }
   }, [currentTurnId]);
+
+  const handleScrape = async () => {
+    if (!confirm("Vil du starte indhentning af alle monstre? Dette tager et par minutter og sker direkte i din browser.")) return;
+    
+    setIsScraping(true);
+    setScrapedCount(0);
+    setScrapeProgress(0);
+    
+    const results: Record<string, string> = { ...fullMonsterData };
+    const total = MONSTER_LIST.length;
+    
+    for (let i = 0; i < total; i++) {
+      const monster = MONSTER_LIST[i];
+      if (results[monster.slug]) {
+        setScrapedCount(prev => prev + 1);
+        setScrapeProgress(Math.round(((i + 1) / total) * 100));
+        continue;
+      }
+
+      try {
+        const response = await fetch(`/api/monster/${monster.slug}`);
+        if (response.ok) {
+          const data = await response.json();
+          results[monster.slug] = data.html;
+        }
+      } catch (e) {
+        console.error(`Failed to scrape ${monster.slug}`, e);
+      }
+      
+      setScrapedCount(i + 1);
+      setScrapeProgress(Math.round(((i + 1) / total) * 100));
+      
+      // Small delay to be nice to the server/proxy
+      if (i % 5 === 0) await new Promise(r => setTimeout(r, 100));
+    }
+    
+    setFullMonsterData(results);
+    setIsScraping(false);
+    
+    // Trigger download
+    const blob = new Blob([JSON.stringify(results, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "monster-data.json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    alert(`Færdig! ${Object.keys(results).length} monstre er nu gemt i hukommelsen og downloadet.`);
+  };
+
+  const downloadExisting = () => {
+    const blob = new Blob([JSON.stringify(fullMonsterData, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "monster-data.json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className={`min-h-screen p-4 md:p-8 font-sans transition-colors duration-300`}>
@@ -757,10 +853,46 @@ export default function App() {
       </AnimatePresence>
 
       {/* Footer info */}
-      <footer className="mt-8 text-center opacity-20 hover:opacity-100 transition-opacity text-[10px]">
-        <p className="flex items-center justify-center gap-2">
+      <footer className="mt-8 text-center opacity-20 hover:opacity-100 transition-opacity text-[10px] pb-8">
+        <div className="flex flex-col items-center justify-center gap-4 max-w-md mx-auto">
           <span>Genveje: Enter (Næste), Backspace (Forrige), + (Tilføj), - (Fjern)</span>
-        </p>
+          
+          <div className="flex flex-col gap-2 w-full">
+            <div className="flex justify-between gap-4">
+              <button 
+                onClick={handleScrape} 
+                disabled={isScraping}
+                className="flex-1 px-2 py-1 border border-current rounded hover:bg-current hover:text-[var(--bg)] transition-colors disabled:opacity-50"
+              >
+                {isScraping ? `Henter... ${scrapeProgress}%` : "Hent al monster-info (Scrape)"}
+              </button>
+              
+              {Object.keys(fullMonsterData).length > 0 && !isScraping && (
+                <button 
+                  onClick={downloadExisting}
+                  className="px-2 py-1 border border-current rounded hover:bg-current hover:text-[var(--bg)] transition-colors"
+                >
+                  Download JSON ({Object.keys(fullMonsterData).length})
+                </button>
+              )}
+            </div>
+
+            {isScraping && (
+              <div className="w-full h-1 bg-current/10 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-current transition-all duration-300" 
+                  style={{ width: `${scrapeProgress}%` }}
+                />
+              </div>
+            )}
+            
+            {isScraping && (
+              <div className="text-[8px]">
+                Hentet {scrapedCount} af {MONSTER_LIST.length} monstre...
+              </div>
+            )}
+          </div>
+        </div>
       </footer>
     </div>
   );
