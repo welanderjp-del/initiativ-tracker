@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Plus, Minus, Trash2, RotateCcw, ChevronRight, ChevronLeft, X, Search } from "lucide-react";
+import { Plus, Minus, Trash2, RotateCcw, ChevronRight, ChevronLeft, ChevronDown, X, Search } from "lucide-react";
 import { MONSTER_LIST } from "./constants";
 import { TrackerRow, Theme, AppState } from "./types";
 
@@ -21,9 +21,13 @@ export default function App() {
   });
   const [isHoveringPopup, setIsHoveringPopup] = useState(false);
   const [fullMonsterData, setFullMonsterData] = useState<Record<string, string>>({});
+  const [showScrapingTools, setShowScrapingTools] = useState(false);
   const [isScraping, setIsScraping] = useState(false);
   const [scrapeProgress, setScrapeProgress] = useState(0);
   const [scrapedCount, setScrapedCount] = useState(0);
+  const [scrapeErrors, setScrapeErrors] = useState<string[]>([]);
+  const [scrapeStatus, setScrapeStatus] = useState<string | null>(null);
+  const stopScrapeRef = useRef(false);
   const isHoveringPopupRef = useRef(false);
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -400,6 +404,9 @@ export default function App() {
       }
     }
     
+    // If not in fullMonsterData, try cache or API
+    if (monsterCache[slug]) return;
+    
     setLoadingSlugs(prev => new Set(prev).add(slug));
     
     try {
@@ -530,20 +537,21 @@ export default function App() {
   }, [currentTurnId]);
 
   const handleScrape = async () => {
-    if (!confirm("Vil du starte indhentning af alle monstre? Dette tager et par minutter og sker direkte i din browser.")) return;
-    
     setIsScraping(true);
+    stopScrapeRef.current = false;
     setScrapedCount(0);
     setScrapeProgress(0);
+    setScrapeErrors([]);
+    setScrapeStatus("Starter indhentning...");
     
     const results: Record<string, string> = { ...fullMonsterData };
     const total = MONSTER_LIST.length;
     let successCount = 0;
     let failCount = 0;
     
-    console.log(`Starting scrape of ${total} monsters...`);
-    
     for (let i = 0; i < total; i++) {
+      if (stopScrapeRef.current) break;
+      
       const monster = MONSTER_LIST[i];
       
       if (results[monster.slug]) {
@@ -553,54 +561,61 @@ export default function App() {
         continue;
       }
 
-      try {
-        const response = await fetch(`/api/monster/${monster.slug}`);
-        if (response.ok) {
-          const data = await response.json();
-          if (data.html && data.html.length > 100) {
-            results[monster.slug] = data.html;
-            successCount++;
+      let fetchedHtml = null;
+      let lastError = "";
+      let retries = 1;
+      
+      while (retries >= 0 && !fetchedHtml) {
+        try {
+          const response = await fetch(`/api/monster/${monster.slug}`);
+          if (response.ok) {
+            const data = await response.json();
+            if (data.html && data.html.length > 100) {
+              fetchedHtml = data.html;
+            } else {
+              lastError = "Tomt svar fra server";
+            }
           } else {
-            console.warn(`Empty or too short HTML for ${monster.slug}`);
-            failCount++;
+            lastError = `Status ${response.status}`;
           }
-        } else {
-          console.error(`Failed to fetch ${monster.slug}: ${response.status}`);
-          failCount++;
+        } catch (e) {
+          lastError = e instanceof Error ? e.message : "Netværksfejl";
         }
-      } catch (e) {
-        console.error(`Error scraping ${monster.slug}:`, e);
+        
+        if (!fetchedHtml && retries > 0) {
+          await new Promise(r => setTimeout(r, 500));
+        }
+        retries--;
+      }
+
+      if (fetchedHtml) {
+        results[monster.slug] = fetchedHtml;
+        successCount++;
+      } else {
         failCount++;
+        setScrapeErrors(prev => [...prev.slice(-4), `${monster.name}: ${lastError}`]);
       }
       
       setScrapedCount(i + 1);
       setScrapeProgress(Math.round(((i + 1) / total) * 100));
-      
-      // Slightly longer delay to avoid rate limiting
-      if (i % 3 === 0) await new Promise(r => setTimeout(r, 200));
+      await new Promise(r => setTimeout(r, 200));
     }
     
     setFullMonsterData(results);
     setIsScraping(false);
+    setScrapeStatus(`Færdig! ${successCount} succes, ${failCount} fejl.`);
     
-    const finalCount = Object.keys(results).length;
-    if (finalCount === 0) {
-      alert("Fejl: Ingen monstre blev hentet. Tjek konsollen for detaljer.");
-      return;
+    if (Object.keys(results).length > 0) {
+      const blob = new Blob([JSON.stringify(results, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "monster-data.json";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     }
-
-    // Trigger download
-    const blob = new Blob([JSON.stringify(results, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "monster-data.json";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    
-    alert(`Færdig! ${finalCount} monstre er nu gemt i hukommelsen og downloadet. (${successCount} succes, ${failCount} fejl)`);
   };
 
   const downloadExisting = () => {
@@ -875,45 +890,104 @@ export default function App() {
       </AnimatePresence>
 
       {/* Footer info */}
-      <footer className="mt-8 text-center opacity-20 hover:opacity-100 transition-opacity text-[10px] pb-8">
+      <footer className="mt-8 text-center opacity-10 hover:opacity-100 transition-opacity text-[10px] pb-8">
         <div className="flex flex-col items-center justify-center gap-4 max-w-md mx-auto">
-          <span>Genveje: Enter (Næste), Backspace (Forrige), + (Tilføj), - (Fjern)</span>
-          
-          <div className="flex flex-col gap-2 w-full">
-            <div className="flex justify-between gap-4">
-              <button 
-                onClick={handleScrape} 
-                disabled={isScraping}
-                className="flex-1 px-2 py-1 border border-current rounded hover:bg-current hover:text-[var(--bg)] transition-colors disabled:opacity-50"
-              >
-                {isScraping ? `Henter... ${scrapeProgress}%` : "Hent al monster-info (Scrape)"}
-              </button>
-              
-              {Object.keys(fullMonsterData).length > 0 && !isScraping && (
-                <button 
-                  onClick={downloadExisting}
-                  className="px-2 py-1 border border-current rounded hover:bg-current hover:text-[var(--bg)] transition-colors"
-                >
-                  Download JSON ({Object.keys(fullMonsterData).length})
-                </button>
-              )}
-            </div>
-
-            {isScraping && (
-              <div className="w-full h-1 bg-current/10 rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-current transition-all duration-300" 
-                  style={{ width: `${scrapeProgress}%` }}
-                />
-              </div>
-            )}
-            
-            {isScraping && (
-              <div className="text-[8px]">
-                Hentet {scrapedCount} af {MONSTER_LIST.length} monstre...
-              </div>
-            )}
+          <div className="flex items-center gap-1 group">
+            <span className="text-gray-500">Genveje: Enter (Næste), Backspace (Forrige), + (Tilføj), - (Fjern)</span>
+            <button 
+              onClick={() => setShowScrapingTools(!showScrapingTools)}
+              className="p-0.5 hover:bg-black/5 rounded transition-colors text-gray-400 opacity-0 group-hover:opacity-100"
+              title="Scraping værktøjer"
+            >
+              <ChevronRight 
+                size={10} 
+                className={`transition-transform duration-200 ${showScrapingTools ? "rotate-90" : ""}`} 
+              />
+            </button>
           </div>
+          
+          <AnimatePresence>
+            {showScrapingTools && (
+              <motion.div 
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="overflow-hidden w-full"
+              >
+                <div className="flex flex-col gap-2 w-full pt-2">
+                  <div className="flex justify-between gap-4">
+                    <button 
+                      onClick={async () => {
+                        setScrapeStatus("Tester forbindelse...");
+                        try {
+                          const res = await fetch("/api/test-connection");
+                          const data = await res.json();
+                          setScrapeStatus(`Status: ${data.status} - ${data.message}`);
+                        } catch (e) {
+                          setScrapeStatus(`Fetch fejlede: ${e}`);
+                        }
+                      }}
+                      className="px-2 py-1 border border-current rounded hover:bg-current hover:text-[var(--bg)] transition-colors"
+                    >
+                      Test Forbindelse
+                    </button>
+                    
+                    <button 
+                      onClick={handleScrape} 
+                      disabled={isScraping}
+                      className="flex-1 px-2 py-1 border border-current rounded hover:bg-current hover:text-[var(--bg)] transition-colors disabled:opacity-50"
+                    >
+                      {isScraping ? `Henter... ${scrapeProgress}%` : "Hent al monster-info (Scrape)"}
+                    </button>
+
+                    {isScraping && (
+                      <button 
+                        onClick={() => stopScrapeRef.current = true}
+                        className="px-2 py-1 border border-red-500 text-red-500 rounded hover:bg-red-500 hover:text-white transition-colors"
+                      >
+                        Stop
+                      </button>
+                    )}
+                    
+                    {Object.keys(fullMonsterData).length > 0 && !isScraping && (
+                      <button 
+                        onClick={downloadExisting}
+                        className="px-2 py-1 border border-current rounded hover:bg-current hover:text-[var(--bg)] transition-colors"
+                      >
+                        Download JSON ({Object.keys(fullMonsterData).length})
+                      </button>
+                    )}
+                  </div>
+
+                  {isScraping && (
+                    <div className="w-full h-1 bg-current/10 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-current transition-all duration-300" 
+                        style={{ width: `${scrapeProgress}%` }}
+                      />
+                    </div>
+                  )}
+                  
+                  {isScraping && (
+                    <div className="text-[8px] flex flex-col gap-1">
+                      <div>Hentet {scrapedCount} af {MONSTER_LIST.length} monstre...</div>
+                      {scrapeErrors.length > 0 && (
+                        <div className="text-red-500/70">
+                          Seneste fejl: {scrapeErrors.join(" | ")}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {scrapeStatus && !isScraping && (
+                    <div className="text-[10px] font-medium text-[var(--accent)] animate-pulse">
+                      {scrapeStatus}
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </footer>
     </div>
