@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "motion/react";
 import { Plus, Minus, Trash2, RotateCcw, ChevronRight, ChevronLeft, ChevronDown, X, Search } from "lucide-react";
-import { MONSTER_LIST } from "./constants";
 import { TrackerRow, Theme, AppState } from "./types";
+import { dataService, Monster } from "./services/dataService";
+import { MonsterStatBlock } from "./components/StatBlockRenderer";
 
 const LOCAL_STORAGE_KEY = "dd-initiative-tracker-state";
 
@@ -15,19 +17,19 @@ export default function App() {
   const [hoveredMonster, setHoveredMonster] = useState<{ slug: string; x: number; y: number } | null>(null);
   const [loadingSlugs, setLoadingSlugs] = useState<Set<string>>(new Set());
   const [activeDropdownId, setActiveDropdownId] = useState<string | null>(null);
-  const [monsterCache, setMonsterCache] = useState<Record<string, string>>(() => {
+  const [monsterList, setMonsterList] = useState<{ name: string; source: string }[]>([]);
+  const [monsterCache, setMonsterCache] = useState<Record<string, string | Monster>>(() => {
     const saved = localStorage.getItem("monster-cache");
-    return saved ? JSON.parse(saved) : {};
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        return {};
+      }
+    }
+    return {};
   });
   const [isHoveringPopup, setIsHoveringPopup] = useState(false);
-  const [fullMonsterData, setFullMonsterData] = useState<Record<string, string>>({});
-  const [showScrapingTools, setShowScrapingTools] = useState(false);
-  const [isScraping, setIsScraping] = useState(false);
-  const [scrapeProgress, setScrapeProgress] = useState(0);
-  const [scrapedCount, setScrapedCount] = useState(0);
-  const [scrapeErrors, setScrapeErrors] = useState<string[]>([]);
-  const [scrapeStatus, setScrapeStatus] = useState<string | null>(null);
-  const stopScrapeRef = useRef(false);
   const isHoveringPopupRef = useRef(false);
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -48,22 +50,11 @@ export default function App() {
 
   // Load state from localStorage
   useEffect(() => {
-    const loadFullData = async () => {
-      try {
-        // Add cache busting to ensure we get the latest valid version
-        const response = await fetch(`/monster-data.json?v=${Date.now()}`);
-        if (response.ok) {
-          const data = await response.json();
-          setFullMonsterData(data);
-          console.log(`Successfully loaded ${Object.keys(data).length} monsters from local data.`);
-        } else {
-          console.warn(`Failed to load monster-data.json: ${response.status} ${response.statusText}`);
-        }
-      } catch (e) {
-        console.error("Error loading monster-data.json:", e);
-      }
+    const loadList = async () => {
+      const list = await dataService.getMonsterList();
+      setMonsterList(list);
     };
-    loadFullData();
+    loadList();
 
     const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
     if (saved) {
@@ -165,306 +156,33 @@ export default function App() {
     }
   };
 
-  const processJaune = (jaune: Element) => {
-    // Fix image paths to use aidedd.org base URL
-    jaune.querySelectorAll('img').forEach(img => {
-      const src = img.getAttribute('src');
-      if (src && !src.startsWith('http') && !src.startsWith('data:')) {
-        // If it's a relative path like "img/beholder.jpg", prefix it
-        img.setAttribute('src', `https://www.aidedd.org/monster/${src}`);
-      }
-      img.setAttribute('referrerpolicy', 'no-referrer');
-    });
-
-    const statLabelsMap: { [key: string]: string } = {
-      "STR": "STR", "FOR": "STR",
-      "DEX": "DEX",
-      "CON": "CON",
-      "INT": "INT",
-      "WIS": "WIS", "SAG": "WIS",
-      "CHA": "CHA"
-    };
-    const statLabels = Object.keys(statLabelsMap);
-
-    // Remove loose MOD/SAVE headers that often appear in aidedd.org blocks
-    jaune.querySelectorAll('div, b, span, td, p').forEach(el => {
-      const t = el.textContent?.trim().toUpperCase();
-      if (t === 'MOD' || t === 'SAVE') {
-        el.remove();
-      }
-    });
-
-    // Find all potential stat blocks
-    let carBlocks = Array.from(jaune.querySelectorAll('[class*="car-block"], [class*="car_block"]'));
-    
-    // If no car-block container, look for the loose .car elements
-    if (carBlocks.length === 0) {
-      const looseStats = Array.from(jaune.querySelectorAll('.car, .car1, .car2, .car3, .car4, .car5, .car6'));
-      if (looseStats.length >= 6) {
-        const wrapper = document.createElement('div');
-        wrapper.className = 'car-block';
-        const first = looseStats[0];
-        const parent = first.parentElement;
-        if (parent) {
-          parent.insertBefore(wrapper, first);
-          // Move all found loose stats into the wrapper
-          looseStats.forEach(stat => wrapper.appendChild(stat));
-          carBlocks = [wrapper];
-        }
-      }
-    }
-
-    // Fallback: if still no car-block class, look for a div containing a stat label
-    if (carBlocks.length === 0) {
-      const allElements = Array.from(jaune.querySelectorAll('div, b, span, td, p'));
-      const firstStatEl = allElements.find(d => {
-        const t = d.textContent?.trim().toUpperCase() || "";
-        return statLabels.includes(t);
-      });
-      
-      if (firstStatEl && firstStatEl.parentElement) {
-        // Try to find a common parent that contains most stats, but stay inside jaune
-        let bestParent = firstStatEl.parentElement;
-        while (bestParent && bestParent.parentElement && bestParent.parentElement !== jaune && 
-               bestParent.textContent && 
-               statLabels.filter(l => bestParent.textContent!.toUpperCase().includes(l)).length < 4) {
-          bestParent = bestParent.parentElement as HTMLElement;
-        }
-        if (bestParent && bestParent !== jaune) carBlocks = [bestParent];
-      }
-    }
-
-    carBlocks.forEach(carBlock => {
-      // Flatten all text content from the block
-      const flattenedTexts: string[] = [];
-      const extract = (el: Node) => {
-        if (el.nodeType === Node.TEXT_NODE) {
-          const t = el.textContent?.trim();
-          if (t) flattenedTexts.push(t);
-        } else if (el.nodeType === Node.ELEMENT_NODE) {
-          const element = el as Element;
-          // If it's a script or style, skip
-          if (element.tagName === 'SCRIPT' || element.tagName === 'STYLE') return;
-          
-          if (element.children.length === 0) {
-            const t = element.textContent?.trim();
-            if (t) flattenedTexts.push(t);
-          } else {
-            Array.from(element.childNodes).forEach(extract);
-          }
-        }
-      };
-      extract(carBlock);
-      
-      const filteredTexts = flattenedTexts.filter(t => {
-        const ut = t.toUpperCase();
-        return ut !== 'MOD' && ut !== 'SAVE' && ut !== '';
-      });
-      
-      const stats: { label: string, score: string, mod: string, save: string }[] = [];
-      let currentStat: any = null;
-
-      filteredTexts.forEach(text => {
-        const upper = text.toUpperCase();
-        if (statLabels.includes(upper)) {
-          if (currentStat) {
-            if (currentStat.mod && !currentStat.save) currentStat.save = currentStat.mod;
-            stats.push(currentStat);
-          }
-          currentStat = { label: statLabelsMap[upper], score: "", mod: "", save: "" };
-        } else if (currentStat) {
-          const fullMatch = text.match(/^(\d+)\s*\(([-+]\d+)\)$/);
-          if (fullMatch) {
-            currentStat.score = fullMatch[1];
-            currentStat.mod = fullMatch[2];
-            currentStat.save = fullMatch[2];
-          } else {
-            const scoreMatch = text.match(/^\d+$/);
-            const modMatch = text.match(/^[-+]\d+$/);
-            if (scoreMatch && !currentStat.score) {
-              currentStat.score = text;
-            } else if (modMatch) {
-              if (!currentStat.mod) currentStat.mod = text;
-              else if (!currentStat.save) currentStat.save = text;
-            }
-          }
-        }
-      });
-      if (currentStat) {
-        if (currentStat.mod && !currentStat.save) currentStat.save = currentStat.mod;
-        stats.push(currentStat);
-      }
-
-      // We should have 6 stats for a full table, but let's render whatever we find
-      if (stats.length > 0) {
-        const wrapper = document.createElement('div');
-        wrapper.className = 'monster-stat-wrapper';
-        
-        let tableHtml = `<table class="monster-stat-table">`;
-        
-        // Headers Row
-        tableHtml += `<tr>`;
-        for (let i = 0; i < 3; i++) {
-          tableHtml += `<th class="stat-header-empty"></th><th class="stat-header-empty"></th><th class="stat-header">MOD</th><th class="stat-header">SAVE</th>`;
-        }
-        tableHtml += `</tr>`;
-        
-        // Data Rows
-        for (let row = 0; row < Math.ceil(stats.length / 3); row++) {
-          tableHtml += `<tr>`;
-          for (let col = 0; col < 3; col++) {
-            const i = row * 3 + col;
-            if (i < stats.length) {
-              const s = stats[i];
-              tableHtml += `
-                <td class="stat-label">${s.label}</td>
-                <td class="stat-score">${s.score}</td>
-                <td class="stat-mod">${s.mod || "+0"}</td>
-                <td class="stat-save">${s.save || s.mod || "+0"}</td>
-              `;
-            } else if (row === 0) {
-               // Fill empty cells if first row is not full
-               tableHtml += `<td colspan="4"></td>`;
-            }
-          }
-          tableHtml += `</tr>`;
-        }
-        
-        tableHtml += `</table>`;
-        wrapper.innerHTML = tableHtml;
-        
-        // Final safety check: if carBlock is jaune, don't replace it, replace its children
-        if (carBlock === jaune) {
-          // This case should be avoided by the fallback logic, but just in case:
-          // We find the first and last stat elements and replace that range
-          const first = Array.from(jaune.querySelectorAll('*')).find(el => statLabels.includes(el.textContent?.trim().toUpperCase() || ""));
-          if (first && first.parentElement) {
-             first.parentElement.insertBefore(wrapper, first);
-             // We can't easily remove the others without knowing where they end, 
-             // but at least the table will be there.
-          }
-        } else {
-          carBlock.replaceWith(wrapper);
-        }
-      }
-    });
-
-    // FINAL AGGRESSIVE CLEANUP: Remove all empty nodes and redundant line breaks
-    const cleanNodes = (root: Element) => {
-      // First, remove any BR tags that are immediately after the stat table wrapper
-      const wrappers = root.querySelectorAll('.monster-stat-wrapper');
-      wrappers.forEach(w => {
-        let next = w.nextSibling;
-        while (next && (next.nodeName === 'BR' || (next.nodeType === Node.TEXT_NODE && !next.textContent?.trim()))) {
-          const toRemove = next;
-          next = next.nextSibling;
-          toRemove.remove();
-        }
-      });
-
-      const all = Array.from(root.querySelectorAll('*'));
-      // Process backwards to handle nested empty elements
-      all.reverse().forEach(el => {
-        if (el.classList.contains('monster-stat-wrapper')) return;
-        if (el.querySelector('img, table, iframe, .monster-stat-wrapper, canvas, svg')) return;
-        
-        // Handle non-breaking spaces and other whitespace
-        const text = el.textContent?.replace(/\u00a0/g, ' ').trim();
-        if (!text && !['BR', 'HR', 'IMG', 'IFRAME', 'CANVAS', 'SVG', 'TH', 'TD'].includes(el.tagName)) {
-          el.remove();
-        }
-      });
-
-      // Remove redundant BRs and BRs at start/end of containers
-      root.querySelectorAll('br').forEach(br => {
-        const next = br.nextSibling;
-        
-        // Remove if it's followed by another BR or if it's the last child
-        if (!next || next.nodeName === 'BR' || (next.nodeType === Node.ELEMENT_NODE && (next as Element).tagName === 'BR')) {
-          br.remove();
-        }
-      });
-      
-      // Remove BRs at the very beginning
-      while (root.firstChild && root.firstChild.nodeName === 'BR') {
-        root.removeChild(root.firstChild);
-      }
-    };
-    cleanNodes(jaune);
-  };
-
-  useEffect(() => {
-    if (!hoveredMonster) {
-      isHoveringPopupRef.current = false;
-      setIsHoveringPopup(false);
-    }
-  }, [hoveredMonster]);
-
-  const fetchMonsterInfo = async (slug: string) => {
+  const fetchMonsterInfo = useCallback(async (slug: string) => {
     if (monsterCache[slug] || loadingSlugs.has(slug)) return;
 
-    // Check local full data first (this state is populated from /monster-data.json)
-    if (fullMonsterData[slug]) {
-      try {
-        const html = fullMonsterData[slug];
-        const parser = new DOMParser();
-        const docObj = parser.parseFromString(html, "text/html");
-        const jaune = docObj.querySelector(".jaune") || docObj.body;
-        
-        if (jaune) {
-          processJaune(jaune as HTMLElement);
-          const content = jaune.innerHTML;
-          setMonsterCache(prev => ({ ...prev, [slug]: content }));
-          return;
-        }
-      } catch (e) {
-        console.error(`Error processing local data for ${slug}:`, e);
-      }
-    }
-    
-    // If not in fullMonsterData or processing failed, try API
-    setLoadingSlugs(prev => new Set(prev).add(slug));
-    
-    try {
-      // Fetch from Server Proxy (which also checks its own local copy of monster-data.json)
-      const response = await fetch(`/api/monster/${slug}`);
-      if (!response.ok) {
-        if (response.status === 404) {
-          throw new Error(`Monster '${slug}' blev ikke fundet.`);
-        }
-        throw new Error(`Server fejl (${response.status})! Prøv igen senere.`);
-      }
-      
-      const data = await response.json();
-      const html = data.html;
-      
-      if (!html || html.length < 100) {
-        throw new Error("Ingen data modtaget for dette monster.");
-      }
+    // The slug is expected to be "Name|Source" or just "Name"
+    const [name, source] = slug.includes('|') ? slug.split('|') : [slug, ""];
 
-      const parser = new DOMParser();
-      const docObj = parser.parseFromString(html, "text/html");
-      const jaune = docObj.querySelector(".jaune") || docObj.body;
-      
-      if (jaune) {
-        processJaune(jaune as HTMLElement);
-        const content = jaune.innerHTML;
-        setMonsterCache(prev => ({ ...prev, [slug]: content }));
-      } else {
-        throw new Error("Kunne ikke finde monster-data i svaret.");
+    try {
+      const monster = await dataService.getMonster(name, source);
+      if (monster) {
+        setMonsterCache(prev => ({ ...prev, [slug]: monster }));
+        return;
       }
     } catch (e) {
-      console.error(`Fetch failed for ${slug}:`, e);
-      const errorMsg = e instanceof Error ? e.message : "Fejl ved hentning af monster info.";
-      setMonsterCache(prev => ({ ...prev, [slug]: `<div class='p-4 text-red-500 font-bold'>${errorMsg}</div>` }));
-    } finally {
-      setLoadingSlugs(prev => {
-        const next = new Set(prev);
-        next.delete(slug);
-        return next;
-      });
+      console.warn(`Monster lookup failed for ${name} (${source})`, e);
     }
-  };
+
+    setMonsterCache(prev => ({ ...prev, [slug]: `<div class='p-4 text-red-500 font-bold'>Monsteret blev ikke fundet.</div>` }));
+  }, [monsterCache, loadingSlugs]);
+
+  // Fetch monster info for all rows that have a monsterSlug
+  useEffect(() => {
+    rows.forEach(row => {
+      if (row.monsterSlug && !monsterCache[row.monsterSlug]) {
+        fetchMonsterInfo(row.monsterSlug);
+      }
+    });
+  }, [rows, monsterCache, fetchMonsterInfo]);
 
   const sortRows = () => {
     setRows((prev) => {
@@ -546,6 +264,24 @@ export default function App() {
     fetchMonsterInfo(hoveredMonster.slug);
   }, [hoveredMonster, monsterCache]);
 
+  const getLargeMonsterImageUrl = (name: string, source: string) => {
+    let finalName = name;
+    const dragonColors = ["black", "blue", "brass", "bronze", "copper", "deep", "gold", "green", "red", "silver", "spirit", "white"];
+    const lowerName = name.toLowerCase();
+    
+    if (lowerName.startsWith("young ") || lowerName.startsWith("adult ")) {
+      const parts = name.split(" ");
+      const baseName = parts.slice(1).join(" ");
+      const lowerBase = baseName.toLowerCase();
+      
+      if (dragonColors.some(color => lowerBase === `${color} dragon`)) {
+        finalName = baseName;
+      }
+    }
+    
+    return `https://5e.tools/img/bestiary/${source}/${encodeURIComponent(finalName)}.webp`;
+  };
+
   const getInitials = (name: string) => {
     return name
       .split(" ")
@@ -564,110 +300,6 @@ export default function App() {
       }
     }
   }, [currentTurnId]);
-
-  const handleScrape = async () => {
-    setIsScraping(true);
-    stopScrapeRef.current = false;
-    setScrapedCount(0);
-    setScrapeProgress(0);
-    setScrapeErrors([]);
-    setScrapeStatus("Starter indhentning...");
-    
-    const results: Record<string, string> = { ...fullMonsterData };
-    const total = MONSTER_LIST.length;
-    let successCount = 0;
-    let failCount = 0;
-    
-    for (let i = 0; i < total; i++) {
-      if (stopScrapeRef.current) break;
-      
-      const monster = MONSTER_LIST[i];
-      
-      // Skip if we already have it in our results
-      if (results[monster.slug]) {
-        setScrapedCount(i + 1);
-        setScrapeProgress(Math.round(((i + 1) / total) * 100));
-        continue;
-      }
-
-      setScrapeStatus(`Henter ${monster.name}...`);
-      let fetchedHtml = null;
-      let lastError = "";
-      let retries = 2; // Increased retries
-      
-      while (retries >= 0 && !fetchedHtml) {
-        try {
-          const response = await fetch(`/api/monster/${monster.slug}`);
-          if (response.ok) {
-            const data = await response.json();
-            // Basic validation of the HTML content
-            if (data.html && data.html.length > 200 && data.html.includes("jaune")) {
-              fetchedHtml = data.html;
-            } else {
-              lastError = "Ugyldig HTML struktur modtaget";
-            }
-          } else {
-            lastError = `Status ${response.status}`;
-          }
-        } catch (e) {
-          lastError = e instanceof Error ? e.message : "Netværksfejl";
-        }
-        
-        if (!fetchedHtml && retries > 0) {
-          await new Promise(r => setTimeout(r, 1000)); // Wait longer between retries
-        }
-        retries--;
-      }
-
-      if (fetchedHtml) {
-        results[monster.slug] = fetchedHtml;
-        successCount++;
-        
-        // Update state every 5 monsters to keep progress and avoid losing data on crash/refresh
-        if (successCount % 5 === 0) {
-          setFullMonsterData({ ...results });
-        }
-      } else {
-        failCount++;
-        setScrapeErrors(prev => [...prev.slice(-4), `${monster.name}: ${lastError}`]);
-      }
-      
-      setScrapedCount(i + 1);
-      setScrapeProgress(Math.round(((i + 1) / total) * 100));
-      // Small delay to be nice to the server
-      await new Promise(r => setTimeout(r, 150));
-    }
-    
-    // Final state update
-    setFullMonsterData({ ...results });
-    setIsScraping(false);
-    setScrapeStatus(`Færdig! ${successCount} nye hentet. Total: ${Object.keys(results).length} monstre.`);
-    
-    // Always offer download if we have data, even if stopped
-    if (Object.keys(results).length > 0) {
-      const blob = new Blob([JSON.stringify(results, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "monster-data.json";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }
-  };
-
-  const downloadExisting = () => {
-    const blob = new Blob([JSON.stringify(fullMonsterData, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "monster-data.json";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
 
   return (
     <div className={`min-h-screen p-4 md:p-8 font-sans transition-colors duration-300`}>
@@ -757,27 +389,29 @@ export default function App() {
                 style={{ zIndex: activeDropdownId === row.id ? 100 : (row.id === currentTurnId ? 10 : 1) }}
               >
                 {/* Initiative */}
-                <input
-                  type="number"
-                  value={row.initiative}
-                  onChange={(e) => updateRow(row.id, { initiative: e.target.value === "" ? "" : Number(e.target.value) })}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      sortRows();
-                      (e.target as HTMLInputElement).blur();
-                    }
-                  }}
-                  className="w-full bg-transparent border-b border-current focus:outline-none text-center font-bold text-lg no-spinner"
-                />
+                <div className="bg-black/10 dark:bg-white/10 rounded-lg px-2 py-1">
+                  <input
+                    type="number"
+                    value={row.initiative}
+                    spellCheck={false}
+                    onChange={(e) => updateRow(row.id, { initiative: e.target.value === "" ? "" : Number(e.target.value) })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        sortRows();
+                        (e.target as HTMLInputElement).blur();
+                      }
+                    }}
+                    className="w-full bg-transparent border-none focus:outline-none text-center font-bold text-lg no-spinner"
+                  />
+                </div>
 
                 {/* Image / Initials */}
                 <div 
-                  className="relative w-12 h-12 rounded-full overflow-hidden bg-black/10 flex items-center justify-center cursor-help group mx-auto"
+                  className="relative w-12 h-12 flex items-center justify-center cursor-pointer group mx-auto"
                   onMouseEnter={(e) => {
                     if (row.monsterSlug) {
-                      const rect = e.currentTarget.getBoundingClientRect();
                       if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-                      setHoveredMonster({ slug: row.monsterSlug, x: rect.right, y: rect.top });
+                      setHoveredMonster({ slug: row.monsterSlug, x: e.clientX, y: e.clientY });
                     }
                   }}
                   onMouseLeave={() => {
@@ -786,15 +420,46 @@ export default function App() {
                     }, 150);
                   }}
                 >
-                  {row.monsterSlug ? (
+                  {row.monsterSlug && !row.imageError ? (
                     <img 
-                      src={`https://www.aidedd.org/monster/img/${row.monsterSlug}.jpg`} 
+                      key={`${row.id}-${row.monsterSlug}`}
+                      src={(() => {
+                        const m = monsterCache[row.monsterSlug];
+                        if (m && typeof m !== 'string') {
+                          return `https://5e.tools/img/bestiary/tokens/${m.source}/${encodeURIComponent(m.name)}.webp`;
+                        }
+                        const monsterEntry = monsterList.find(m => `${m.name}|${m.source}` === row.monsterSlug);
+                        if (monsterEntry) {
+                           return `https://5e.tools/img/bestiary/tokens/${monsterEntry.source || 'MM'}/${encodeURIComponent(monsterEntry.name)}.webp`;
+                        }
+                        return `https://www.aidedd.org/monster/img/${row.monsterSlug}.jpg`;
+                      })()} 
                       alt={row.name} 
                       className="w-full h-full object-cover"
                       referrerPolicy="no-referrer"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const m = monsterCache[row.monsterSlug!];
+                        if (m && typeof m !== 'string') {
+                          window.open(getLargeMonsterImageUrl(m.name, m.source), "_blank");
+                        } else {
+                          const monsterEntry = monsterList.find(me => `${me.name}|${me.source}` === row.monsterSlug);
+                          if (monsterEntry) {
+                            window.open(getLargeMonsterImageUrl(monsterEntry.name, monsterEntry.source || 'MM'), "_blank");
+                          } else {
+                            window.open(`https://www.aidedd.org/monster/img/${row.monsterSlug}.jpg`, "_blank");
+                          }
+                        }
+                      }}
                       onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = 'none';
-                        (e.target as HTMLImageElement).parentElement!.innerHTML = `<span class="font-bold text-sm">${getInitials(row.name)}</span>`;
+                        // Fallback to aidedd if token fails
+                        const target = e.target as HTMLImageElement;
+                        if (!target.src.includes('aidedd.org') && row.monsterSlug) {
+                          const nameOnly = row.monsterSlug.split('|')[0].toLowerCase().replace(/\s+/g, '-');
+                          target.src = `https://www.aidedd.org/monster/img/${nameOnly}.jpg`;
+                        } else {
+                          updateRow(row.id, { imageError: true });
+                        }
                       }}
                     />
                   ) : (
@@ -803,69 +468,106 @@ export default function App() {
                 </div>
 
                 {/* Name with Dropdown */}
-                <div className="relative">
+                <div className="relative bg-black/10 dark:bg-white/10 rounded-lg px-2 py-1">
                   <input
                     type="text"
                     value={row.name}
                     onFocus={() => setActiveDropdownId(row.id)}
                     onBlur={() => setTimeout(() => setActiveDropdownId(null), 200)}
                     onChange={(e) => {
-                      updateRow(row.id, { name: e.target.value });
+                      const newName = e.target.value;
+                      const updates: Partial<TrackerRow> = { name: newName };
+                      // If the name is changed manually, we clear the monster connection
+                      if (row.monsterSlug && row.name !== newName) {
+                        updates.monsterSlug = undefined;
+                        updates.imageError = false;
+                      }
+                      updateRow(row.id, updates);
                       if (activeDropdownId !== row.id) setActiveDropdownId(row.id);
                     }}
-                    className="w-full bg-transparent border-b border-current focus:outline-none text-lg"
+                    className="w-full bg-transparent border-none focus:outline-none text-lg shadow-none ring-0 focus:ring-0"
+                    spellCheck={false}
                     placeholder="Navn..."
                   />
-                  {activeDropdownId === row.id && (row.name.length > 0 || row.monsterSlug) && (
-                    <div className="absolute top-full left-0 w-full max-h-64 overflow-y-auto bg-[var(--card)] border border-[var(--border)] rounded-lg shadow-2xl z-[200] mt-1 scrollbar-thin">
-                      {MONSTER_LIST.filter(m => m.name.toLowerCase().includes(row.name.toLowerCase())).map(m => (
-                        <button
-                          key={m.slug}
-                          onMouseDown={(e) => e.preventDefault()} // Prevent blur before click
-                          onClick={() => {
-                            updateRow(row.id, { name: m.name, monsterSlug: m.slug });
-                            setActiveDropdownId(null);
-                          }}
-                          className="w-full text-left px-4 py-3 hover:bg-[var(--accent)] hover:text-white transition-colors text-sm text-[var(--text)] border-b border-[var(--border)] last:border-0"
-                        >
-                          {m.name}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                  {activeDropdownId === row.id && (row.name.length > 0 || row.monsterSlug) && (() => {
+                    const filtered = monsterList.filter(m => m.name.toLowerCase().includes(row.name.toLowerCase())).slice(0, 50);
+                    if (filtered.length === 0) return null;
+                    return (
+                      <div className="absolute top-full left-0 w-full max-h-64 overflow-y-auto bg-[var(--card)] border border-[var(--border)] rounded-lg shadow-2xl z-[200] mt-1 scrollbar-thin">
+                        {filtered.map(m => (
+                          <button
+                            key={`${m.name}|${m.source}`}
+                            onMouseDown={(e) => e.preventDefault()} // Prevent blur before click
+                            onClick={() => {
+                              updateRow(row.id, { 
+                                name: m.name, 
+                                monsterSlug: `${m.name}|${m.source}`,
+                                imageError: false 
+                              });
+                              setActiveDropdownId(null);
+                            }}
+                            className="w-full text-left px-4 py-3 hover:bg-[var(--accent)] hover:text-white transition-colors text-sm text-[var(--text)] border-b border-[var(--border)] last:border-0 flex justify-between items-center"
+                          >
+                            <span>{m.name}</span>
+                            <span className="text-xs opacity-50">{dataService.getSourceName(m.source)}</span>
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* HP */}
-                <input
-                  type="number"
-                  value={row.hp}
-                  onChange={(e) => updateRow(row.id, { hp: e.target.value === "" ? "" : Number(e.target.value) })}
-                  className="w-full bg-transparent border-b border-current focus:outline-none text-center font-bold"
-                />
+                <div className="bg-black/10 dark:bg-white/10 rounded-lg px-2 py-1">
+                  <input
+                    type="number"
+                    value={row.hp}
+                    spellCheck={false}
+                    onChange={(e) => updateRow(row.id, { hp: e.target.value === "" ? "" : Number(e.target.value) })}
+                    className="w-full bg-transparent border-none focus:outline-none text-center font-bold"
+                  />
+                </div>
 
                 {/* Damage/Heal */}
-                <input
-                  type="number"
-                  placeholder="±"
-                  onFocus={(e) => e.target.select()}
-                  onChange={(e) => e.target.focus()} // Ensure focus when using arrows
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      handleDamageHeal(row.id, (e.target as HTMLInputElement).value, row.hp);
-                      (e.target as HTMLInputElement).value = "";
-                      (e.target as HTMLInputElement).blur();
-                    }
-                  }}
-                  className="w-full bg-black/5 dark:bg-white/5 rounded px-2 py-1 focus:outline-none text-center"
-                />
+                <div className="bg-black/10 dark:bg-white/10 rounded-lg px-2 py-1">
+                  <input
+                    type="number"
+                    placeholder="±"
+                    spellCheck={false}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => e.target.focus()} // Ensure focus when using arrows
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        handleDamageHeal(row.id, (e.target as HTMLInputElement).value, row.hp);
+                        (e.target as HTMLInputElement).value = "";
+                        (e.target as HTMLInputElement).blur();
+                      }
+                    }}
+                    className="w-full bg-transparent border-none focus:outline-none text-center"
+                  />
+                </div>
 
                 {/* Notes */}
-                <textarea
-                  value={row.notes}
-                  onChange={(e) => updateRow(row.id, { notes: e.target.value })}
-                  className="w-full bg-transparent border-b border-current focus:outline-none text-sm resize-none h-8"
-                  placeholder="Noter..."
-                />
+                <div className="bg-black/10 dark:bg-white/10 rounded-lg px-2 py-1">
+                  <textarea
+                    value={row.notes}
+                    spellCheck={false}
+                    onChange={(e) => updateRow(row.id, { notes: e.target.value })}
+                    onInput={(e) => {
+                      const target = e.target as HTMLTextAreaElement;
+                      target.style.height = 'auto';
+                      target.style.height = target.scrollHeight + 'px';
+                    }}
+                    ref={(el) => {
+                      if (el) {
+                        el.style.height = 'auto';
+                        el.style.height = el.scrollHeight + 'px';
+                      }
+                    }}
+                    className="w-full bg-transparent border-none focus:outline-none text-sm resize-none min-h-[2rem] overflow-hidden"
+                    placeholder="Noter..."
+                  />
+                </div>
 
                 {/* Delete */}
                 <button
@@ -905,7 +607,7 @@ export default function App() {
               width: "100%",
               minWidth: "400px",
               maxWidth: Math.min(
-                (monsterCache[hoveredMonster?.slug || ""]?.length || 0) > 1500 ? 1100 : (monsterCache[hoveredMonster?.slug || ""]?.length || 0) > 600 ? 750 : 400,
+                (typeof monsterCache[hoveredMonster?.slug || ""] === "string" ? (monsterCache[hoveredMonster?.slug || ""] as string).length : 2000) > 1500 ? 1100 : (typeof monsterCache[hoveredMonster?.slug || ""] === "string" ? (monsterCache[hoveredMonster?.slug || ""] as string).length : 2000) > 600 ? 750 : 400,
                 window.innerWidth - (hoveredMonster?.x || 0) - 60
               ),
               maxHeight: "calc(100vh - 40px)",
@@ -917,12 +619,21 @@ export default function App() {
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#9c2b1b]"></div>
                 <span className="ml-3 font-serif">Henter information...</span>
               </div>
-            ) : (
+            ) : monsterCache[hoveredMonster?.slug || ""] ? (
               <div 
-                className="monster-info-content"
+                className="monster-info-content custom-scrollbar"
                 style={{ height: "100%" }}
-                dangerouslySetInnerHTML={{ __html: monsterCache[hoveredMonster?.slug || ""] || (loadingSlugs.has(hoveredMonster?.slug || "") ? "Henter information..." : "Ingen information fundet.") }} 
-              />
+              >
+                {typeof monsterCache[hoveredMonster?.slug || ""] === "string" ? (
+                  <div dangerouslySetInnerHTML={{ __html: monsterCache[hoveredMonster?.slug || ""] as string }} />
+                ) : (
+                  <MonsterStatBlock monster={monsterCache[hoveredMonster?.slug || ""] as Monster} isPopup={true} />
+                )}
+              </div>
+            ) : (
+              <div className="p-8 text-center italic opacity-50">
+                Ingen information fundet.
+              </div>
             )}
           </motion.div>
         )}
@@ -933,100 +644,7 @@ export default function App() {
         <div className="flex flex-col items-center justify-center gap-4 max-w-md mx-auto">
           <div className="flex items-center gap-2">
             <span className="text-gray-500">Genveje: Enter (Næste), Backspace (Forrige), + (Tilføj), - (Fjern)</span>
-            <button 
-              onClick={() => setShowScrapingTools(!showScrapingTools)}
-              className="p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded transition-all text-gray-400/30 hover:text-gray-400"
-              title="Avancerede værktøjer"
-            >
-              <ChevronRight 
-                size={12} 
-                className={`transition-transform duration-300 ${showScrapingTools ? "rotate-90" : ""}`} 
-              />
-            </button>
           </div>
-          
-          <AnimatePresence>
-            {showScrapingTools && (
-              <motion.div 
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                className="overflow-hidden w-full"
-              >
-                <div className="flex flex-col gap-2 w-full pt-2">
-                  <div className="flex justify-between gap-4">
-                    <button 
-                      onClick={async () => {
-                        setScrapeStatus("Tester forbindelse...");
-                        try {
-                          const res = await fetch("/api/test-connection");
-                          const data = await res.json();
-                          setScrapeStatus(`Status: ${data.status} - ${data.message}`);
-                        } catch (e) {
-                          setScrapeStatus(`Fetch fejlede: ${e}`);
-                        }
-                      }}
-                      className="px-2 py-1 border border-current rounded hover:bg-current hover:text-[var(--bg)] transition-colors"
-                    >
-                      Test Forbindelse
-                    </button>
-                    
-                    <button 
-                      onClick={handleScrape} 
-                      disabled={isScraping}
-                      className="flex-1 px-2 py-1 border border-current rounded hover:bg-current hover:text-[var(--bg)] transition-colors disabled:opacity-50"
-                    >
-                      {isScraping ? `Henter... ${scrapeProgress}%` : "Hent al monster-info (Scrape)"}
-                    </button>
-
-                    {isScraping && (
-                      <button 
-                        onClick={() => stopScrapeRef.current = true}
-                        className="px-2 py-1 border border-red-500 text-red-500 rounded hover:bg-red-500 hover:text-white transition-colors"
-                      >
-                        Stop
-                      </button>
-                    )}
-                    
-                    {Object.keys(fullMonsterData).length > 0 && !isScraping && (
-                      <button 
-                        onClick={downloadExisting}
-                        className="px-2 py-1 border border-current rounded hover:bg-current hover:text-[var(--bg)] transition-colors"
-                      >
-                        Download JSON ({Object.keys(fullMonsterData).length})
-                      </button>
-                    )}
-                  </div>
-
-                  {isScraping && (
-                    <div className="w-full h-1 bg-current/10 rounded-full overflow-hidden">
-                      <div 
-                        className="h-full bg-current transition-all duration-300" 
-                        style={{ width: `${scrapeProgress}%` }}
-                      />
-                    </div>
-                  )}
-                  
-                  {isScraping && (
-                    <div className="text-[8px] flex flex-col gap-1">
-                      <div>Hentet {scrapedCount} af {MONSTER_LIST.length} monstre...</div>
-                      {scrapeErrors.length > 0 && (
-                        <div className="text-red-500/70">
-                          Seneste fejl: {scrapeErrors.join(" | ")}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {scrapeStatus && !isScraping && (
-                    <div className="text-[10px] font-medium text-[var(--accent)] animate-pulse">
-                      {scrapeStatus}
-                    </div>
-                  )}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
         </div>
       </footer>
     </div>
