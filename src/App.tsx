@@ -310,10 +310,10 @@ export default function App() {
       {/* Header */}
       <header className="flex flex-col md:flex-row items-center justify-between gap-4 mb-4 bg-[var(--card)] p-4 rounded-xl border border-[var(--border)] shadow-lg sticky top-0 z-50">
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-3">
+          <a href="https://skolechips.dk" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
             <img src="https://res.cloudinary.com/dtw8jfk0k/image/upload/v1774706790/d4b01caa-2d0a-405a-b893-1a04cfefab27_qf9jsx.png" alt="Logo" className="w-10 h-10" referrerPolicy="no-referrer" />
             <h1 className="text-2xl font-bold text-[var(--accent)]">D&D Initiativ</h1>
-          </div>
+          </a>
           <div className="h-8 w-px bg-[var(--border)] mx-2" />
           <div className="text-lg font-semibold">Runde: {round}</div>
         </div>
