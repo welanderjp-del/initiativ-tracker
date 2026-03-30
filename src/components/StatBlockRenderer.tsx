@@ -478,8 +478,22 @@ export const MonsterStatBlock: React.FC<{ monster: Monster; isPopup?: boolean }>
   const formatType = (type: any) => {
     if (!type) return "Unknown";
     if (typeof type === "string") return type;
-    if (type.type) return `${type.type} (${type.tags?.join(", ")})`;
-    return JSON.stringify(type);
+    if (type.type) {
+      const typeName = type.type;
+      if (!type.tags) return typeName;
+      
+      const tags = type.tags.map((t: any) => {
+        if (typeof t === 'string') return t;
+        if (typeof t === 'object' && t !== null) {
+          if (t.prefix) return `${t.prefix} ${t.tag || ""}`.trim();
+          return t.tag || t.name || "Unknown";
+        }
+        return String(t);
+      }).join(", ");
+      
+      return `${typeName} (${tags})`;
+    }
+    return typeof type === 'object' ? (type.type || "Unknown") : String(type);
   };
 
   const formatAc = (ac: any[]) => {
@@ -487,17 +501,33 @@ export const MonsterStatBlock: React.FC<{ monster: Monster; isPopup?: boolean }>
     return ac.map((a, i) => {
       if (typeof a === "number") return <React.Fragment key={i}>{i > 0 && ", "}{a}</React.Fragment>;
       if (typeof a === "object") {
-        let acVal = a.ac;
+        let acVal: React.ReactNode = a.ac;
         if (typeof acVal === 'object' && acVal !== null) {
-          const num = acVal.number ?? acVal.value ?? "";
-          const cond = acVal.condition ? ` (${acVal.condition})` : "";
+          const num = (acVal as any).number ?? (acVal as any).value ?? "";
+          const cond = (acVal as any).condition ? ` (${(acVal as any).condition})` : "";
           acVal = `${num}${cond}`;
         }
         
-        const from = a.from ? ` (${a.from.map((f: string) => parseTags(f)).join(", ")})` : "";
-        const condition = a.condition ? ` while ${parseTags(a.condition)}` : "";
+        const from = a.from ? (
+          <React.Fragment>
+            {" ("}
+            {a.from.map((f: string, fi: number) => (
+              <React.Fragment key={fi}>
+                {fi > 0 && ", "}
+                {parseTags(f)}
+              </React.Fragment>
+            ))}
+            {")"}
+          </React.Fragment>
+        ) : null;
+
+        const condition = a.condition ? (
+          <React.Fragment>
+            {" while "}
+            {parseTags(a.condition)}
+          </React.Fragment>
+        ) : null;
         
-        // Handle the specific "12 (15 with mage armor)" format if possible
         if (a.braces && i > 0) {
           return (
             <React.Fragment key={i}>
