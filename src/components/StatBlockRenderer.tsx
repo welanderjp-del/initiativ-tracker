@@ -69,11 +69,22 @@ const calculatePB = (cr: string) => {
 
 const capitalize = (s: string) => s ? s.charAt(0).toUpperCase() + s.slice(1) : "";
 
+const schoolMap: Record<string, string> = {
+  'A': 'Abjuration',
+  'C': 'Conjuration',
+  'D': 'Divination',
+  'E': 'Enchantment',
+  'V': 'Evocation',
+  'I': 'Illusion',
+  'N': 'Necromancy',
+  'T': 'Transmutation'
+};
+
 const TagComponent: React.FC<TagProps> = ({ tag, name, source, displayText }) => {
   const [hovered, setHovered] = useState(false);
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
-  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [position, setPosition] = useState<{ x: number; y?: number; bottom?: number; maxHeight?: number }>({ x: 0, y: 0 });
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleMouseEnter = async (e: React.MouseEvent) => {
@@ -84,19 +95,28 @@ const TagComponent: React.FC<TagProps> = ({ tag, name, source, displayText }) =>
     
     // Check if popup would go off screen
     const popupWidth = 320; // Matches w-80 in className
-    const popupHeight = 300; // Estimated max height
     
     let finalX = x;
-    let finalY = y;
-    
     if (x + popupWidth > window.innerWidth) {
       finalX = window.innerWidth - popupWidth - 10;
     }
-    if (finalY + popupHeight > window.innerHeight) {
-      finalY = window.innerHeight - popupHeight - 10;
+    if (finalX < 10) finalX = 10;
+    
+    // If in bottom half of screen, grow upwards from the mouse position
+    if (y > window.innerHeight / 2) {
+      setPosition({ 
+        x: finalX, 
+        bottom: window.innerHeight - y + 10,
+        maxHeight: y - 20
+      });
+    } else {
+      setPosition({ 
+        x: finalX, 
+        y: y + 10,
+        maxHeight: window.innerHeight - y - 20
+      });
     }
     
-    setPosition({ x: finalX, y: finalY });
     setHovered(true);
 
     if (!data && !loading) {
@@ -107,6 +127,7 @@ const TagComponent: React.FC<TagProps> = ({ tag, name, source, displayText }) =>
         if (t === "creature") return await dataService.getMonster(n, s);
         if (t === "condition" || t === "disease" || t === "status") return await dataService.getEntry(t, n, s);
         if (t === "variantrule") return await dataService.getEntry("variantrules", n, s);
+        if (t === "action") return await dataService.getEntry("action", n, s);
         if (t === "language" || t === "sense") return await dataService.getEntry(t, n, s);
         if (["item", "loot", "name", "race", "skill"].includes(t)) return await dataService.getEntry(t, n, s);
         return null;
@@ -149,10 +170,12 @@ const TagComponent: React.FC<TagProps> = ({ tag, name, source, displayText }) =>
             initial={{ opacity: 0, y: 10, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.95 }}
-            className="fixed z-[10000] w-80 max-h-96 overflow-y-auto bg-[#fdfaf3] border border-[#d1c9b8] rounded-sm shadow-2xl p-4 text-sm pointer-events-auto font-serif text-[#1a1a1a]"
+            className="fixed z-[10000] w-80 overflow-y-auto bg-[#fdfaf3] border border-[#d1c9b8] rounded-sm shadow-2xl p-4 text-sm pointer-events-auto font-serif text-[#1a1a1a]"
             style={{ 
-              left: Math.min(position.x, window.innerWidth - 340), 
-              top: position.y + 10 > window.innerHeight - 200 ? position.y - 200 : position.y + 10 
+              left: position.x, 
+              top: position.y,
+              bottom: position.bottom,
+              maxHeight: position.maxHeight
             }}
             onMouseEnter={() => { if (timeoutRef.current) clearTimeout(timeoutRef.current); }}
             onMouseLeave={handleMouseLeave}
@@ -167,7 +190,12 @@ const TagComponent: React.FC<TagProps> = ({ tag, name, source, displayText }) =>
                 <div className="opacity-90 leading-relaxed">
                   {tag === "spell" && (
                     <div className="mb-2 italic text-xs opacity-70">
-                      Level {data.level} {data.school}
+                      {data.level === 0 ? "Cantrip" : `Level ${data.level}`} {schoolMap[data.school] || data.school}
+                    </div>
+                  )}
+                  {tag === "action" && data.time && (
+                    <div className="mb-2 italic text-xs opacity-70">
+                      Time: {Array.isArray(data.time) ? data.time.map((t: any) => typeof t === 'string' ? t : `${t.number} ${t.unit}`).join(", ") : data.time}
                     </div>
                   )}
                   <EntryRenderer entry={data.entries || data.text || data.description || "Ingen beskrivelse fundet."} />
@@ -187,8 +215,25 @@ const TagComponent: React.FC<TagProps> = ({ tag, name, source, displayText }) =>
   );
 };
 
-export const parseTags = (text: string): (string | React.ReactNode)[] => {
+export const parseTags = (text: any): (string | React.ReactNode)[] => {
   if (!text) return [""];
+  
+  if (typeof text !== 'string') {
+    if (typeof text === 'object' && text !== null) {
+      if (text.number !== undefined || text.value !== undefined) {
+        const num = text.number ?? text.value ?? "";
+        const cond = text.condition ? ` (${text.condition})` : "";
+        return [`${num}${cond}`];
+      }
+      // If it's an array of strings, join them
+      if (Array.isArray(text) && text.every(i => typeof i === 'string')) {
+        return [text.join(", ")];
+      }
+      return [JSON.stringify(text)];
+    }
+    return [String(text)];
+  }
+
   const parts: (string | React.ReactNode)[] = [];
   let lastIndex = 0;
   const regex = /\{@(\w+)(?:\s+([^}]+))?\}/g;
@@ -236,12 +281,12 @@ export const EntryRenderer: React.FC<{ entry: any; inline?: boolean }> = ({ entr
 
   if (typeof entry === "object" && entry !== null) {
     // Handle traits/actions/entries with names
-    if (entry.name && (entry.entries || entry.text)) {
+    if (entry.name && (entry.entries || entry.text || entry.entry)) {
       return (
         <div className={inline ? "inline mb-1" : "mb-2"}>
           <span className="font-bold italic mr-1">{parseTags(entry.name)}.</span>
           <span className="inline">
-            <EntryRenderer entry={entry.entries || entry.text} inline={true} />
+            <EntryRenderer entry={entry.entries || entry.text || entry.entry} inline={true} />
           </span>
         </div>
       );
@@ -253,7 +298,7 @@ export const EntryRenderer: React.FC<{ entry: any; inline?: boolean }> = ({ entr
           <div className={inline ? "inline" : "mb-2"}>
             {entry.name && <span className="font-bold italic mr-1">{parseTags(entry.name)}.</span>}
             <span className="inline">
-              <EntryRenderer entry={entry.entries} inline={inline} />
+              <EntryRenderer entry={entry.entries || entry.entry || entry.text} inline={inline} />
             </span>
           </div>
         );
@@ -314,6 +359,15 @@ export const EntryRenderer: React.FC<{ entry: any; inline?: boolean }> = ({ entr
               </li>
             ))}
           </ul>
+        );
+      case "item":
+        return (
+          <div className={inline ? "inline mb-1" : "mb-2"}>
+            {entry.name && <span className="font-bold italic mr-1">{parseTags(entry.name)}.</span>}
+            <span className="inline">
+              <EntryRenderer entry={entry.entries || entry.entry || entry.text} inline={inline} />
+            </span>
+          </div>
         );
       case "table":
         return (
@@ -611,7 +665,11 @@ export const MonsterStatBlock: React.FC<{ monster: Monster; isPopup?: boolean }>
               {i > 0 ? ", " : ""}
               {typeof c === 'string' 
                 ? parseTags(`{@condition ${c}||${capitalize(c)}}`) 
-                : parseTags(c.condition.map((cc: string) => `{@condition ${cc}||${capitalize(cc)}}`).join(", "))
+                : c.condition && Array.isArray(c.condition)
+                  ? parseTags(c.condition.map((cc: string) => `{@condition ${cc}||${capitalize(cc)}}`).join(", "))
+                  : c.condition && typeof c.condition === 'string'
+                    ? parseTags(`{@condition ${c.condition}||${capitalize(c.condition)}}`)
+                    : null
               }
             </React.Fragment>
           ))}</div>
@@ -636,25 +694,37 @@ export const MonsterStatBlock: React.FC<{ monster: Monster; isPopup?: boolean }>
         </div>
       </div>
 
-      {monster.trait && (
+      {/* Traits Section */}
+      {(monster.trait || (monster.spellcasting && monster.spellcasting.some((s: any) => !s.displayAs || s.displayAs === 'trait'))) && (
         <div className="space-y-3 mb-4">
           <h3 className="text-xl font-bold text-[var(--accent)] mb-1">Traits</h3>
           <hr className="border-t-2 border-[var(--accent)] mb-2" />
-          {monster.trait.map((t, i) => (
+          {monster.trait?.map((t, i) => (
             <div key={i}>
               <EntryRenderer entry={t} />
+            </div>
+          ))}
+          {monster.spellcasting?.filter((s: any) => !s.displayAs || s.displayAs === 'trait').map((s: any, i: number) => (
+            <div key={`spell-trait-${i}`}>
+              <EntryRenderer entry={s} />
             </div>
           ))}
         </div>
       )}
 
-      {monster.action && (
+      {/* Actions Section */}
+      {(monster.action || (monster.spellcasting && monster.spellcasting.some((s: any) => s.displayAs === 'action'))) && (
         <div className="space-y-3 mb-4">
           <h3 className="text-xl font-bold text-[var(--accent)] mb-1">Actions</h3>
           <hr className="border-t-2 border-[var(--accent)] mb-2" />
-          {monster.action.map((a, i) => (
+          {monster.action?.map((a, i) => (
             <div key={i}>
               <EntryRenderer entry={a} />
+            </div>
+          ))}
+          {monster.spellcasting?.filter((s: any) => s.displayAs === 'action').map((s: any, i: number) => (
+            <div key={`spell-action-${i}`}>
+              <EntryRenderer entry={s} />
             </div>
           ))}
         </div>
@@ -688,6 +758,22 @@ export const MonsterStatBlock: React.FC<{ monster: Monster; isPopup?: boolean }>
         <div className="space-y-3 mb-4 pb-2">
           <h3 className="text-xl font-bold text-[var(--accent)] mb-1">Legendary Actions</h3>
           <hr className="border-t-2 border-[var(--accent)] mb-2" />
+          
+          {/* Legendary Action Blurb */}
+          {monster.legendaryHeader ? (
+            <div className="mb-2 italic">
+              <EntryRenderer entry={monster.legendaryHeader} />
+            </div>
+          ) : (
+            <div className="mb-2 italic text-sm opacity-90">
+              {monster.source === 'XMM' || monster.source === 'XPHB' ? (
+                <span>Legendary Action Uses: {monster.legendaryActions || 3}{monster.legendaryActionsLair ? ` (${monster.legendaryActionsLair} in Lair)` : ''}. Immediately after another creature's turn, {monster.name} can expend a use to take one of the following actions. {monster.name} regains all expended uses at the start of each of its turns.</span>
+              ) : (
+                <span>{monster.name} can take {monster.legendaryActions || 3}{monster.legendaryActionsLair ? ` (${monster.legendaryActionsLair} in Lair)` : ''} legendary actions, choosing from the options below. Only one legendary action option can be used at a time and only at the end of another creature's turn. {monster.name} regains spent legendary actions at the start of its turn.</span>
+              )}
+            </div>
+          )}
+          
           {monster.legendary.map((l, i) => (
             <div key={i}>
               <EntryRenderer entry={l} />
@@ -721,58 +807,6 @@ export const MonsterStatBlock: React.FC<{ monster: Monster; isPopup?: boolean }>
           <h3 className="text-xl font-bold text-[var(--accent)] mb-1">Regional Effects</h3>
           <hr className="border-t-2 border-[var(--accent)] mb-2" />
           <EntryRenderer entry={monster.regionalEffects} />
-        </div>
-      )}
-
-      {monster.spellcasting && (
-        <div className="space-y-3 mb-4">
-          {monster.spellcasting.map((s, i) => (
-            <div key={i} className="mb-2">
-              <span className="font-bold italic mr-1">{parseTags(s.name)}.</span>
-              <div className="inline">
-                {s.headerEntries && <EntryRenderer entry={s.headerEntries} inline />}
-                {s.will && (
-                  <div className="mt-1">
-                    <span className="italic">At will: </span>
-                    {s.will.map((sp: string, idx: number) => (
-                      <React.Fragment key={idx}>
-                        {idx > 0 && ", "}{parseTags(sp)}
-                      </React.Fragment>
-                    ))}
-                  </div>
-                )}
-                {s.daily && (
-                  <div className="mt-1">
-                    {Object.entries(s.daily).map(([freq, spells]: [string, any], idx) => (
-                      <div key={idx}>
-                        <span className="italic">{freq.replace('e', '/day each')}: </span>
-                        {spells.map((sp: string, j: number) => (
-                          <React.Fragment key={j}>
-                            {j > 0 && ", "}{parseTags(sp)}
-                          </React.Fragment>
-                        ))}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {s.spells && (
-                  <div className="mt-1">
-                    {Object.entries(s.spells).map(([level, data]: [string, any], idx) => (
-                      <div key={idx}>
-                        <span className="italic">{level === "0" ? "Cantrips (at will)" : `Level ${level} (${data.slots} slots)`}: </span>
-                        {data.spells.map((sp: string, j: number) => (
-                          <React.Fragment key={j}>
-                            {j > 0 && ", "}{parseTags(sp)}
-                          </React.Fragment>
-                        ))}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {s.footerEntries && <EntryRenderer entry={s.footerEntries} inline />}
-              </div>
-            </div>
-          ))}
         </div>
       )}
 

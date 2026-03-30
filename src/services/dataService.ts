@@ -302,8 +302,10 @@ class DataService {
       // Handle _copy logic
       if (monster._copy) {
         const copyMeta = monster._copy;
+        console.log(`Merging ${name} from ${copyMeta.name} (${copyMeta.source})`);
         const baseMonster = await this.getMonster(copyMeta.name, copyMeta.source);
         if (baseMonster) {
+          console.log(`Found base monster ${copyMeta.name}`);
           const mods = copyMeta._mod;
           const preserve = copyMeta._preserve || {};
           
@@ -316,7 +318,9 @@ class DataService {
               if (!mod || !mod.mode) return target;
               
               if (mod.mode === "replaceTxt") {
-                const search = new RegExp(mod.replace, mod.flags || "g");
+                let flags = mod.flags || "g";
+                if (!flags.includes("g")) flags += "g";
+                const search = new RegExp(mod.replace, flags);
                 const replace = mod.with;
                 
                 const replaceInObject = (obj: any): any => {
@@ -412,6 +416,7 @@ class DataService {
             if (preserve[key]) continue; // Skip if preserved from base
             finalMonster[key] = monster[key];
           }
+          console.log(`Merge complete for ${name}. Traits: ${finalMonster.trait?.length || 0}, Actions: ${finalMonster.action?.length || 0}`);
           monster = finalMonster;
         }
       }
@@ -588,6 +593,9 @@ class DataService {
       } else if (type === "name") {
         data = await this.fetchFile("/data/names.json");
         list = data?.name || [];
+      } else if (type === "action") {
+        data = await this.fetchFile("/data/actions.json");
+        list = data?.action || [];
       } else {
         // Fallback for other types
         const path = `/data/${type}.json`;
