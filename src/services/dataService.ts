@@ -162,16 +162,43 @@ class DataService {
     "XPHB": "Player's Handbook (2024)"
   };
 
-  async loadBestiaryIndex() {
-    if (this.bestiaryIndex) return this.bestiaryIndex;
+  private async fetchWithTimeout(resource: string, options: any = {}) {
+    const { timeout = 8000 } = options;
+    
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    
     try {
-      const response = await fetch('/data/bestiary/index.json');
-      this.bestiaryIndex = await response.json();
-      return this.bestiaryIndex;
-    } catch (e) {
-      console.error("Failed to load bestiary index", e);
-      return {};
+      const response = await fetch(resource, {
+        ...options,
+        signal: controller.signal
+      });
+      clearTimeout(id);
+      return response;
+    } catch (error) {
+      clearTimeout(id);
+      throw error;
     }
+  }
+
+  async loadBestiaryIndex(retries = 3) {
+    if (this.bestiaryIndex) return this.bestiaryIndex;
+    
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        console.log(`[DataService] Loading bestiary index (attempt ${attempt}/${retries})...`);
+        const response = await this.fetchWithTimeout('/data/bestiary/index.json');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        this.bestiaryIndex = await response.json();
+        console.log("[DataService] Bestiary index loaded successfully.");
+        return this.bestiaryIndex;
+      } catch (e) {
+        console.error(`[DataService] Failed to load bestiary index (attempt ${attempt}/${retries}):`, e);
+        if (attempt === retries) return {};
+        await new Promise(r => setTimeout(r, 500 * attempt));
+      }
+    }
+    return {};
   }
 
   async loadFluffIndex() {
@@ -198,106 +225,157 @@ class DataService {
     }
   }
 
-  private async fetchFile(path: string) {
+  private async fetchFile(path: string, retries = 3) {
     if (this.fileCache[path]) return this.fileCache[path];
-    try {
-      const response = await fetch(path);
-      if (!response.ok) return null;
-      
-      const contentType = response.headers.get("content-type");
-      if (!contentType || !contentType.includes("application/json")) {
-        return null;
-      }
+    
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        console.log(`[DataService] Fetching file (attempt ${attempt}/${retries}): ${path}`);
+        const response = await this.fetchWithTimeout(path);
+        
+        if (!response.ok) {
+          console.error(`[DataService] Failed to fetch ${path}: ${response.status} ${response.statusText}`);
+          if (attempt === retries) return null;
+          await new Promise(r => setTimeout(r, 500 * attempt));
+          continue;
+        }
+        
+        const contentType = response.headers.get("content-type");
+        if (!contentType || !contentType.includes("application/json")) {
+          console.error(`[DataService] Invalid content type for ${path}: ${contentType}`);
+          return null;
+        }
 
-      const data = await response.json();
-      this.fileCache[path] = data;
-      return data;
-    } catch (e) {
-      // Silently fail for missing or malformed files to avoid console spam
-      return null;
+        const data = await response.json();
+        this.fileCache[path] = data;
+        return data;
+      } catch (e) {
+        console.error(`[DataService] Error fetching ${path} (attempt ${attempt}/${retries}):`, e);
+        if (attempt === retries) return null;
+        await new Promise(r => setTimeout(r, 500 * attempt));
+      }
     }
+    return null;
   }
 
-  async getMonsterList(): Promise<{ name: string; source: string }[]> {
-    if (this.monsterList) return this.monsterList;
+  private refreshPromise: Promise<{ name: string; source: string }[]> | null = null;
+
+  async getMonsterList(onUpdate?: (list: { name: string; source: string }[]) => void): Promise<{ name: string; source: string }[]> {
+    if (this.monsterList && this.monsterList.length > 0) {
+      if (onUpdate) onUpdate(this.monsterList);
+      return this.monsterList;
+    }
     
     // Try loading from localStorage first
     const saved = localStorage.getItem("monster-list-cache");
     if (saved) {
       try {
         this.monsterList = JSON.parse(saved);
-        // Still trigger a background refresh to keep it up to date, 
-        // but return the cached version immediately
-        this.refreshMonsterList();
-        return this.monsterList!;
+        if (this.monsterList && this.monsterList.length > 0) {
+          if (onUpdate) onUpdate(this.monsterList);
+          // Still trigger a background refresh to keep it up to date
+          this.refreshMonsterList(onUpdate);
+          return this.monsterList;
+        }
       } catch (e) {
         console.error("Failed to parse cached monster list", e);
       }
     }
 
-    return this.refreshMonsterList();
+    return this.refreshMonsterList(onUpdate);
   }
 
-  private async refreshMonsterList(): Promise<{ name: string; source: string }[]> {
-    if (this.isRefreshing) return this.monsterList || [];
-    this.isRefreshing = true;
-    try {
-      const index = await this.loadBestiaryIndex();
-      const sources = Object.keys(index || {});
-      
-      // Prioritize common sources to get a list quickly
-      const prioritySources = ["XMM", "MM", "MPMM", "VGM", "MTF"];
-      const otherSources = sources.filter(s => !prioritySources.includes(s));
-      const sortedSources = [...prioritySources.filter(s => sources.includes(s)), ...otherSources];
-      
-      const allMonsters: { name: string; source: string }[] = [];
-      
-      // Fetch files in chunks to avoid overwhelming the browser
-      const chunkSize = 10;
-      for (let i = 0; i < sortedSources.length; i += chunkSize) {
-        const chunk = sortedSources.slice(i, i + chunkSize);
-        const promises = chunk.map(async (source) => {
-          const fileName = index?.[source];
-          if (!fileName) return;
-          const data = await this.fetchFile(`/data/bestiary/${fileName}`);
-          if (data && data.monster) {
-            data.monster.forEach((m: any) => {
-              allMonsters.push({ name: m.name, source: m.source || source });
-            });
-          }
-        });
-        await Promise.all(promises);
-        
-        // If we have a decent amount of monsters, update the list early to show something
-        if (i === 0 && allMonsters.length > 0) {
-          this.monsterList = [...allMonsters].sort((a, b) => a.name.localeCompare(b.name));
-        }
-      }
-      
-      // Final sort and cache
-      allMonsters.sort((a, b) => a.name.localeCompare(b.name));
-      console.log(`Loaded ${allMonsters.length} monsters from ${sources.length} sources.`);
-      
-      this.monsterList = allMonsters;
-      localStorage.setItem("monster-list-cache", JSON.stringify(allMonsters));
-      return allMonsters;
-    } finally {
-      this.isRefreshing = false;
+  private async refreshMonsterList(onUpdate?: (list: { name: string; source: string }[]) => void): Promise<{ name: string; source: string }[]> {
+    if (this.refreshPromise) {
+      // If already refreshing, wait for it but also return current partial list if available
+      if (onUpdate && this.monsterList) onUpdate(this.monsterList);
+      return this.refreshPromise;
     }
+
+    this.refreshPromise = (async () => {
+      this.isRefreshing = true;
+      try {
+        console.log("[DataService] Refreshing monster list...");
+        const index = await this.loadBestiaryIndex();
+        const sources = Object.keys(index || {});
+        
+        if (sources.length === 0) {
+          console.warn("[DataService] No sources found in bestiary index.");
+          return [];
+        }
+
+        // Prioritize common sources to get a list quickly
+        const prioritySources = ["XMM", "MM", "MPMM", "VGM", "MTF"];
+        const otherSources = sources.filter(s => !prioritySources.includes(s));
+        const sortedSources = [...prioritySources.filter(s => sources.includes(s)), ...otherSources];
+        
+        const allMonsters: { name: string; source: string }[] = [];
+        
+        // Fetch files in chunks to avoid overwhelming the browser
+        const chunkSize = 10;
+        for (let i = 0; i < sortedSources.length; i += chunkSize) {
+          const chunk = sortedSources.slice(i, i + chunkSize);
+          const promises = chunk.map(async (source) => {
+            const fileName = index?.[source];
+            if (!fileName) return;
+            const data = await this.fetchFile(`/data/bestiary/${fileName}`);
+            if (data && data.monster) {
+              data.monster.forEach((m: any) => {
+                if (m.name && typeof m.name === 'string') {
+                  allMonsters.push({ name: m.name, source: m.source || source });
+                }
+              });
+            }
+          });
+          await Promise.all(promises);
+          
+          // Update the list and notify callback
+          this.monsterList = [...allMonsters].sort((a, b) => a.name.localeCompare(b.name));
+          if (onUpdate) onUpdate(this.monsterList);
+        }
+        
+        // Final sort and cache
+        allMonsters.sort((a, b) => a.name.localeCompare(b.name));
+        console.log(`[DataService] Loaded ${allMonsters.length} monsters from ${sources.length} sources.`);
+        
+        this.monsterList = allMonsters;
+        localStorage.setItem("monster-list-cache", JSON.stringify(allMonsters));
+        return allMonsters;
+      } catch (error) {
+        console.error("[DataService] Error refreshing monster list:", error);
+        return this.monsterList || [];
+      } finally {
+        this.isRefreshing = false;
+        this.refreshPromise = null;
+      }
+    })();
+
+    return this.refreshPromise;
   }
 
   async getMonster(name: string, source: string): Promise<Monster | null> {
     const cacheKey = `monster-${name}-${source || "any"}`;
     if (this.entryCache[cacheKey]) return this.entryCache[cacheKey];
 
+    console.log(`[DataService] getMonster called for "${name}" (${source || "any source"})`);
     const index = await this.loadBestiaryIndex();
     
     const trySource = async (s: string) => {
       const fileName = index?.[s];
-      if (!fileName) return null;
+      if (!fileName) {
+        console.log(`[DataService] No filename for source "${s}" in index`);
+        return null;
+      }
       const data = await this.fetchFile(`/data/bestiary/${fileName}`);
-      if (!data || !data.monster) return null;
-      return data.monster.find((m: any) => m.name.toLowerCase() === name.toLowerCase());
+      if (!data || !data.monster) {
+        console.log(`[DataService] No monster data in ${fileName}`);
+        return null;
+      }
+      const found = data.monster.find((m: any) => m.name.toLowerCase() === name.toLowerCase());
+      if (found) {
+        console.log(`[DataService] Found "${name}" in source "${s}" (${fileName})`);
+      }
+      return found;
     };
 
     const priorityMap: Record<string, string> = { 
@@ -306,7 +384,9 @@ class DataService {
       "DMG": "XDMG",
       "MM'25": "XMM",
       "PHB'24": "XPHB",
-      "DMG'24": "XDMG"
+      "DMG'24": "XDMG",
+      "VGM": "MPMM",
+      "MTF": "MPMM"
     };
     let monster = null;
 
@@ -316,14 +396,16 @@ class DataService {
     }
 
     // 2. Try priority version of requested source if not found
-    // ONLY if the requested source was not found, we try the priority one.
     if (!monster && source && priorityMap[source]) {
+      console.log(`[DataService] "${name}" not found in "${source}", trying priority alternative "${priorityMap[source]}"`);
       monster = await trySource(priorityMap[source]);
     }
 
     // 3. If no source or not found, try global priority sources
     if (!monster) {
-      for (const ps of ["XMM", "XPHB", "XDMG"]) {
+      console.log(`[DataService] "${name}" not found in requested source, searching global priority sources...`);
+      for (const ps of ["XMM", "XPHB", "XDMG", "MM", "MPMM"]) {
+        if (ps === source) continue;
         monster = await trySource(ps);
         if (monster) break;
       }
@@ -331,8 +413,10 @@ class DataService {
 
     // 4. Fallback to any match in index
     if (!monster) {
+      console.log(`[DataService] "${name}" still not found, searching all sources...`);
       const sources = Object.keys(index || {});
       for (const s of sources) {
+        if (s === source) continue;
         monster = await trySource(s);
         if (monster) break;
       }
@@ -345,6 +429,7 @@ class DataService {
       // Handle _copy logic
       if (monster._copy) {
         const copyMeta = monster._copy;
+        console.log(`[DataService] Processing _copy for "${name}": base="${copyMeta.name}", source="${copyMeta.source}"`);
         const baseMonster = await this.getMonster(copyMeta.name, copyMeta.source);
         if (baseMonster) {
           const mods = copyMeta._mod;
@@ -356,6 +441,7 @@ class DataService {
           // Apply templates if any
           if (copyMeta._templates) {
             for (const t of copyMeta._templates) {
+              console.log(`[DataService] Applying template "${t.name}" from "${t.source}" to "${name}"`);
               const template = await this.getTemplate(t.name, t.source);
               if (template && template.apply) {
                 // Apply _root changes
@@ -372,6 +458,7 @@ class DataService {
           
           // Apply modifications from _copy
           if (mods) {
+            console.log(`[DataService] Applying monster-specific modifications to "${name}"`);
             merged = this.applyModifications(merged, mods);
           }
 
@@ -397,7 +484,14 @@ class DataService {
             if (preserve[key]) continue; // Skip if preserved from base
             finalMonster[key] = monster[key];
           }
+          
+          // Ensure name and source are from the original entry
+          finalMonster.name = monster.name;
+          finalMonster.source = monster.source || source;
+          
           monster = finalMonster;
+        } else {
+          console.warn(`[DataService] Could not find base monster "${copyMeta.name}" for "${name}"`);
         }
       }
       
@@ -422,9 +516,45 @@ class DataService {
         }
       }
 
+      // Replace placeholders like <$name$>, <$short_name$>, etc.
+      monster = this.replacePlaceholders(monster, monster);
+
       this.entryCache[cacheKey] = monster;
+    } else {
+      console.warn(`[DataService] Monster "${name}" not found in any source.`);
     }
     return monster;
+  }
+
+  private replacePlaceholders(obj: any, monster: any): any {
+    if (!obj) return obj;
+    const name = monster.name || "";
+    const shortName = monster.shortName || name;
+    const titleName = name.split(',')[0].trim();
+    const titleShortName = shortName.split(',')[0].trim();
+
+    const replaceStr = (s: string) => {
+      if (typeof s !== 'string') return s;
+      return s.replace(/<\$name\$>/g, name)
+              .replace(/<\$short_name\$>/g, shortName)
+              .replace(/<\$title_name\$>/g, titleName)
+              .replace(/<\$title_short_name\$>/g, titleShortName);
+    };
+
+    const traverse = (o: any): any => {
+      if (typeof o === 'string') return replaceStr(o);
+      if (Array.isArray(o)) return o.map(traverse);
+      if (typeof o === 'object' && o !== null) {
+        const newObj: any = {};
+        for (const key in o) {
+          newObj[key] = traverse(o[key]);
+        }
+        return newObj;
+      }
+      return o;
+    };
+
+    return traverse(obj);
   }
 
   async getLegendaryGroup(name: string, source: string): Promise<any | null> {
@@ -464,7 +594,7 @@ class DataService {
   private applyModifications(target: any, mods: any): any {
     let merged = JSON.parse(JSON.stringify(target));
 
-    const applyMod = (fieldTarget: any, mod: any): any => {
+    const applyMod = (fieldTarget: any, mod: any, isRoot = false): any => {
       if (!mod || !mod.mode) return fieldTarget;
       
       if (mod.mode === "replaceTxt") {
@@ -491,13 +621,14 @@ class DataService {
       }
       
       if (mod.mode === "appendArr" || mod.mode === "prependArr") {
+        if (isRoot) return fieldTarget; // Cannot append to root object
         const currentArr = Array.isArray(fieldTarget) ? fieldTarget : [];
         const items = Array.isArray(mod.items) ? mod.items : [mod.items];
         return mod.mode === "appendArr" ? [...currentArr, ...items] : [...items, ...currentArr];
       }
       
       if (mod.mode === "replaceArr") {
-        if (!Array.isArray(fieldTarget)) return fieldTarget;
+        if (isRoot || !Array.isArray(fieldTarget)) return fieldTarget;
         const replaceVal = mod.replace;
         const withVal = mod.with;
         return fieldTarget.map(item => {
@@ -508,7 +639,7 @@ class DataService {
       }
       
       if (mod.mode === "removeArr") {
-        if (!Array.isArray(fieldTarget)) return fieldTarget;
+        if (isRoot || !Array.isArray(fieldTarget)) return fieldTarget;
         const names = Array.isArray(mod.names) ? mod.names : [mod.names];
         return fieldTarget.filter(item => {
           const itemName = typeof item === "object" && item !== null ? item.name : item;
@@ -517,6 +648,7 @@ class DataService {
       }
       
       if (mod.mode === "insertArr") {
+        if (isRoot) return fieldTarget;
         const currentArr = Array.isArray(fieldTarget) ? fieldTarget : [];
         const items = Array.isArray(mod.items) ? mod.items : [mod.items];
         const index = mod.index || 0;
@@ -526,36 +658,49 @@ class DataService {
       }
       
       if (mod.mode === "addProp") {
-        const newObj = typeof fieldTarget === "object" && fieldTarget !== null ? { ...fieldTarget } : {};
+        const newObj = typeof fieldTarget === "object" && fieldTarget !== null && !Array.isArray(fieldTarget) 
+          ? { ...fieldTarget } 
+          : (isRoot ? { ...merged } : {});
         newObj[mod.prop] = mod.with;
         return newObj;
       }
       
       if (mod.mode === "removeProp") {
-        if (typeof fieldTarget !== "object" || fieldTarget === null) return fieldTarget;
+        if (typeof fieldTarget !== "object" || fieldTarget === null || Array.isArray(fieldTarget)) return fieldTarget;
         const newObj = { ...fieldTarget };
         delete newObj[mod.prop];
         return newObj;
       }
 
       if (mod.mode === "addSenses") {
-        const currentSenses = Array.isArray(fieldTarget) ? fieldTarget : (typeof fieldTarget === 'string' ? [fieldTarget] : []);
-        const newSenses = Array.isArray(mod.senses) ? mod.senses : [mod.senses];
-        const formattedSenses = newSenses.map(s => typeof s === 'string' ? s : `${s.type} ${s.range} ft.`);
-        return [...currentSenses, ...formattedSenses];
+        const targetObj = (isRoot || (typeof fieldTarget === 'object' && fieldTarget !== null && !Array.isArray(fieldTarget))) ? fieldTarget : null;
+        if (targetObj) {
+          const currentSenses = Array.isArray(targetObj.senses) ? targetObj.senses : (typeof targetObj.senses === 'string' ? [targetObj.senses] : []);
+          const newSenses = Array.isArray(mod.senses) ? mod.senses : [mod.senses];
+          const formattedSenses = newSenses.map(s => typeof s === 'string' ? s : `${s.type} ${s.range} ft.`);
+          targetObj.senses = [...currentSenses, ...formattedSenses];
+          return targetObj;
+        }
+        return fieldTarget;
       }
 
       if (mod.mode === "addSkills") {
-        const currentSkills = typeof fieldTarget === 'object' && fieldTarget !== null ? { ...fieldTarget } : {};
-        const newSkills = mod.skills || {};
-        for (const skill in newSkills) {
-          const val = newSkills[skill];
-          currentSkills[skill] = typeof val === 'number' ? (val >= 0 ? `+${val}` : `${val}`) : val;
+        const targetObj = (isRoot || (typeof fieldTarget === 'object' && fieldTarget !== null && !Array.isArray(fieldTarget))) ? fieldTarget : null;
+        if (targetObj) {
+          const currentSkills = typeof targetObj.skill === 'object' && targetObj.skill !== null ? { ...targetObj.skill } : {};
+          const newSkills = mod.skills || {};
+          for (const skill in newSkills) {
+            const val = newSkills[skill];
+            currentSkills[skill] = typeof val === 'number' ? (val >= 0 ? `+${val}` : `${val}`) : val;
+          }
+          targetObj.skill = currentSkills;
+          return targetObj;
         }
-        return currentSkills;
+        return fieldTarget;
       }
 
       if (mod.mode === "appendIfNotExistsArr") {
+        if (isRoot) return fieldTarget;
         const currentArr = Array.isArray(fieldTarget) ? fieldTarget : (fieldTarget ? [fieldTarget] : []);
         const items = Array.isArray(mod.items) ? mod.items : [mod.items];
         const toAdd = items.filter(item => !currentArr.includes(item));
@@ -571,7 +716,7 @@ class DataService {
       if (mods[gk]) {
         const globalMods = Array.isArray(mods[gk]) ? mods[gk] : [mods[gk]];
         globalMods.forEach(m => {
-          merged = applyMod(merged, m);
+          merged = applyMod(merged, m, true);
         });
       }
     });
@@ -581,7 +726,7 @@ class DataService {
       if (globalKeys.includes(field)) continue;
       const fieldMods = Array.isArray(mods[field]) ? mods[field] : [mods[field]];
       fieldMods.forEach(m => {
-        merged[field] = applyMod(merged[field], m);
+        merged[field] = applyMod(merged[field], m, false);
       });
     }
 

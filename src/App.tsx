@@ -52,7 +52,9 @@ export default function App() {
   useEffect(() => {
     const loadList = async () => {
       console.log("Loading monster list...");
-      const list = await dataService.getMonsterList();
+      const list = await dataService.getMonsterList((partialList) => {
+        setMonsterList(partialList);
+      });
       console.log(`Monster list loaded: ${list.length} monsters.`);
       setMonsterList(list);
     };
@@ -357,17 +359,6 @@ export default function App() {
             <option value="cormanthor">Cormanthor</option>
             <option value="mount-celestia">Mount Celestia</option>
           </select>
-          <button
-            onClick={() => {
-              dataService.clearCache();
-              setMonsterCache({});
-              window.location.reload();
-            }}
-            className="p-2 rounded-lg bg-[var(--bg)] hover:bg-red-500 hover:text-white transition-all border border-[var(--border)]"
-            title="Ryd monster-cache"
-          >
-            <Trash2 size={20} />
-          </button>
         </div>
       </header>
 
@@ -503,11 +494,11 @@ export default function App() {
                     placeholder="Navn..."
                   />
                   {activeDropdownId === row.id && (row.name.length > 0 || row.monsterSlug) && (() => {
-                    const filtered = monsterList.filter(m => m.name.toLowerCase().includes(row.name.toLowerCase())).slice(0, 50);
+                    const filtered = monsterList.filter(m => m.name && m.name.toLowerCase().includes(row.name.toLowerCase())).slice(0, 50);
                     if (filtered.length === 0) {
                       if (monsterList.length === 0) {
                         return (
-                          <div className="absolute top-full left-0 w-full p-4 bg-[var(--card)] border border-[var(--border)] rounded-lg shadow-2xl z-[200] mt-1 text-center italic opacity-50 text-xs">
+                          <div className="absolute top-full left-0 w-full p-4 bg-[var(--card)] border border-[var(--border)] rounded-lg shadow-2xl z-[200] mt-1 text-center italic opacity-50 text-xs text-[var(--text)]">
                             Indlæser monstre...
                           </div>
                         );
@@ -530,8 +521,8 @@ export default function App() {
                             }}
                             className="w-full text-left px-4 py-3 hover:bg-[var(--accent)] hover:text-white transition-colors text-sm text-[var(--text)] border-b border-[var(--border)] last:border-0 flex justify-between items-center"
                           >
-                            <span>{m.name}</span>
-                            <span className="text-xs opacity-50">{dataService.getSourceName(m.source)}</span>
+                            <span className="font-medium">{m.name}</span>
+                            <span className="text-xs opacity-60 ml-2 shrink-0">{dataService.getSourceName(m.source)}</span>
                           </button>
                         ))}
                       </div>
@@ -664,8 +655,23 @@ export default function App() {
       {/* Footer info */}
       <footer className="mt-8 text-center opacity-10 hover:opacity-100 transition-opacity text-[10px] pb-8">
         <div className="flex flex-col items-center justify-center gap-4 max-w-md mx-auto">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-4">
             <span className="text-gray-500">Genveje: Enter (Næste), Backspace (Forrige), + (Tilføj), - (Fjern)</span>
+            <button
+              onClick={() => {
+                if (window.confirm("Vil du rydde monster-cachen? Dette vil genindlæse siden.")) {
+                  dataService.clearCache();
+                  setMonsterCache({});
+                  localStorage.removeItem("monster-cache");
+                  localStorage.removeItem("monster-list-cache");
+                  window.location.reload();
+                }
+              }}
+              className="text-gray-400 hover:text-red-500 transition-colors cursor-pointer"
+              title="Ryd monster-cache"
+            >
+              <Trash2 size={10} />
+            </button>
           </div>
         </div>
       </footer>
