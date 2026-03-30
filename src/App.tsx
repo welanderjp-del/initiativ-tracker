@@ -51,7 +51,9 @@ export default function App() {
   // Load state from localStorage
   useEffect(() => {
     const loadList = async () => {
+      console.log("Loading monster list...");
       const list = await dataService.getMonsterList();
+      console.log(`Monster list loaded: ${list.length} monsters.`);
       setMonsterList(list);
     };
     loadList();
@@ -355,6 +357,17 @@ export default function App() {
             <option value="cormanthor">Cormanthor</option>
             <option value="mount-celestia">Mount Celestia</option>
           </select>
+          <button
+            onClick={() => {
+              dataService.clearCache();
+              setMonsterCache({});
+              window.location.reload();
+            }}
+            className="p-2 rounded-lg bg-[var(--bg)] hover:bg-red-500 hover:text-white transition-all border border-[var(--border)]"
+            title="Ryd monster-cache"
+          >
+            <Trash2 size={20} />
+          </button>
         </div>
       </header>
 
@@ -491,7 +504,16 @@ export default function App() {
                   />
                   {activeDropdownId === row.id && (row.name.length > 0 || row.monsterSlug) && (() => {
                     const filtered = monsterList.filter(m => m.name.toLowerCase().includes(row.name.toLowerCase())).slice(0, 50);
-                    if (filtered.length === 0) return null;
+                    if (filtered.length === 0) {
+                      if (monsterList.length === 0) {
+                        return (
+                          <div className="absolute top-full left-0 w-full p-4 bg-[var(--card)] border border-[var(--border)] rounded-lg shadow-2xl z-[200] mt-1 text-center italic opacity-50 text-xs">
+                            Indlæser monstre...
+                          </div>
+                        );
+                      }
+                      return null;
+                    }
                     return (
                       <div className="absolute top-full left-0 w-full max-h-64 overflow-y-auto bg-[var(--card)] border border-[var(--border)] rounded-lg shadow-2xl z-[200] mt-1 scrollbar-thin">
                         {filtered.map(m => (

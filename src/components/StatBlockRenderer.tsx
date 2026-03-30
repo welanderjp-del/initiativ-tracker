@@ -493,12 +493,25 @@ export const MonsterStatBlock: React.FC<{ monster: Monster; isPopup?: boolean }>
           const cond = acVal.condition ? ` (${acVal.condition})` : "";
           acVal = `${num}${cond}`;
         }
+        
+        const from = a.from ? ` (${a.from.map((f: string) => parseTags(f)).join(", ")})` : "";
+        const condition = a.condition ? ` while ${parseTags(a.condition)}` : "";
+        
+        // Handle the specific "12 (15 with mage armor)" format if possible
+        if (a.braces && i > 0) {
+          return (
+            <React.Fragment key={i}>
+              {" "}({acVal}{condition})
+            </React.Fragment>
+          );
+        }
+
         return (
           <React.Fragment key={i}>
             {i > 0 && ", "}
             {acVal}
-            {a.from && <span> ({a.from.map((f: string, j: number) => <React.Fragment key={j}>{j > 0 && ", "}{parseTags(f)}</React.Fragment>)})</span>}
-            {a.condition && <span> while {parseTags(a.condition)}</span>}
+            {from}
+            {condition}
           </React.Fragment>
         );
       }
@@ -533,6 +546,8 @@ export const MonsterStatBlock: React.FC<{ monster: Monster; isPopup?: boolean }>
         const val = (v as any).number ?? (v as any).value ?? "";
         const cond = (v as any).condition ? ` (${(v as any).condition})` : "";
         displayValue = `${val}${cond}`;
+      } else if (typeof v === 'number') {
+        displayValue = (v >= 0 ? "+" : "") + v;
       }
       return (
         <React.Fragment key={k}>
@@ -654,7 +669,33 @@ export const MonsterStatBlock: React.FC<{ monster: Monster; isPopup?: boolean }>
           <div><span className="font-bold">Skills</span> {formatObjectEntries(monster.skill)}</div>
         )}
         {monster.resist && (
-          <div><span className="font-bold">Damage Resistances</span> {monster.resist.map((r: any, i: number) => <React.Fragment key={i}>{i > 0 ? ", " : ""}{typeof r === 'string' ? parseTags(capitalize(r)) : parseTags(capitalize(r.resist.join(", ")))}</React.Fragment>)}</div>
+          <div>
+            <span className="font-bold">Damage Resistances</span>{" "}
+            {monster.resist.map((r: any, i: number) => {
+              if (typeof r === 'string') return <React.Fragment key={i}>{i > 0 ? ", " : ""}{parseTags(capitalize(r))}</React.Fragment>;
+              
+              let res = "";
+              if (r.special) {
+                res = r.special;
+              } else if (r.resist) {
+                res = r.resist.map((rr: string) => capitalize(rr)).join(", ");
+              }
+              
+              const pre = r.preNote ? `${r.preNote} ` : "";
+              let post = "";
+              if (r.note) {
+                const cleanNote = r.note.startsWith("(") && r.note.endsWith(")") ? r.note.slice(1, -1) : r.note;
+                post = ` (${parseTags(cleanNote)})`;
+              }
+              
+              return (
+                <React.Fragment key={i}>
+                  {i > 0 ? ", " : ""}
+                  {pre}{parseTags(res)}{post}
+                </React.Fragment>
+              );
+            })}
+          </div>
         )}
         {monster.immune && (
           <div><span className="font-bold">Damage Immunities</span> {monster.immune.map((r: any, i: number) => <React.Fragment key={i}>{i > 0 ? ", " : ""}{typeof r === 'string' ? parseTags(capitalize(r)) : parseTags(capitalize(r.immune.join(", ")))}</React.Fragment>)}</div>
