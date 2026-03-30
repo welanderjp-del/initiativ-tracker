@@ -518,6 +518,7 @@ export default function App() {
                                 imageError: false 
                               });
                               setActiveDropdownId(null);
+                              (document.activeElement as HTMLElement)?.blur();
                             }}
                             className="w-full text-left px-4 py-3 hover:bg-[var(--accent)] hover:text-white transition-colors text-sm text-[var(--text)] border-b border-[var(--border)] last:border-0 flex justify-between items-center"
                           >
