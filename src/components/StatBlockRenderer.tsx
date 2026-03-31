@@ -195,16 +195,59 @@ const TagComponent: React.FC<TagProps> = ({ tag, name, source, displayText }) =>
     return <span className="text-[var(--accent)] font-semibold underline decoration-dotted cursor-help hover:text-[var(--accent-hover)] transition-colors" onMouseEnter={handleMouseEnter} onMouseLeave={handleMouseLeave}>{text}</span>;
   };
 
-  if (tag === "dice" || tag === "damage" || tag === "hit" || tag === "dc" || tag === "atk" || tag === "h" || tag === "recharge" || tag === "language") {
+  const abilityMap: Record<string, string> = {
+    'str': 'Strength',
+    'dex': 'Dexterity',
+    'con': 'Constitution',
+    'int': 'Intelligence',
+    'wis': 'Wisdom',
+    'cha': 'Charisma'
+  };
+
+  const isD20Tag = tag === "d20" || tag.startsWith("d20") || (tag.length === 4 && tag.startsWith("d") && abilityMap[tag.slice(1)]);
+
+  if (tag === "dice" || tag === "damage" || tag === "hit" || tag === "dc" || tag === "atk" || tag === "h" || tag === "recharge" || tag === "language" || isD20Tag) {
     // These are simple tags that don't need popups for now, just styling
     let label = displayText || name;
     if (tag === "hit") label = `+${name}`;
     if (tag === "dc") label = `DC ${name}`;
-    if (tag === "atk") label = name === "mw" ? "Melee Weapon Attack:" : "Ranged Weapon Attack:";
+    
+    if (tag === "atk" || tag === "d20") {
+      const atkMap: Record<string, string> = {
+        'mw': 'Melee Weapon Attack:',
+        'rw': 'Ranged Weapon Attack:',
+        'ma': 'Melee Attack:',
+        'ra': 'Ranged Attack:',
+        'm': 'Melee Attack Roll:',
+        'r': 'Ranged Attack Roll:',
+        'm,r': 'Melee or Ranged Attack Roll:',
+        'r,m': 'Melee or Ranged Attack Roll:'
+      };
+      if (atkMap[name]) {
+        label = atkMap[name];
+      } else if (tag === "d20") {
+        label = displayText || name;
+      }
+    }
+
+    let ability = "";
+    if (tag.startsWith("d20") && tag.length > 3) {
+      ability = tag.slice(3);
+    } else if (tag.length === 4 && tag.startsWith("d") && abilityMap[tag.slice(1)]) {
+      ability = tag.slice(1);
+    }
+
+    if (ability) {
+      const abilityName = abilityMap[ability] || capitalize(ability);
+      label = `${abilityName} Saving Throw: DC ${name}`;
+    }
+
     if (tag === "h") label = "Hit: ";
     if (tag === "recharge") label = `(Recharge ${name}${name === "6" ? "" : "–6"})`;
     
-    if (tag === "atk") return <span className="italic">{label}</span>;
+    if (tag === "atk" || (tag === "d20" && (name === 'mw' || name === 'rw' || name === 'ma' || name === 'ra' || name === 'm' || name === 'r' || name === 'm,r' || name === 'r,m'))) {
+      return <span className="italic">{label}</span>;
+    }
     if (tag === "language") return <span className="text-inherit font-normal">{label}</span>;
     return <span className="font-bold text-[var(--accent)]">{label}</span>;
   }
@@ -340,7 +383,10 @@ export const EntryRenderer: React.FC<{ entry: any; inline?: boolean }> = ({ entr
     if (entry.name && (entry.entries || entry.text || entry.entry)) {
       return (
         <div className={inline ? "inline mb-1" : "mb-2"}>
-          <span className="font-bold italic mr-1">{parseTags(entry.name)}.</span>
+          <span className="font-bold italic mr-1">
+            {parseTags(entry.name)}
+            {entry.name === "Response" ? "—" : "."}
+          </span>
           <span className="inline">
             <EntryRenderer entry={entry.entries || entry.text || entry.entry} inline={true} />
           </span>
@@ -452,7 +498,7 @@ export const EntryRenderer: React.FC<{ entry: any; inline?: boolean }> = ({ entr
           </div>
         );
       case "abilityDc":
-        return <span>save DC {entry.dc}</span>;
+        return <span>Saving Throw: DC {entry.dc}</span>;
       case "abilityAttackMod":
         return <span>{entry.amount >= 0 ? "+" : ""}{entry.amount} to hit</span>;
       case "dice":
