@@ -204,7 +204,7 @@ const TagComponent: React.FC<TagProps> = ({ tag, name, source, displayText }) =>
     'cha': 'Charisma'
   };
 
-  const isD20Tag = tag === "d20" || tag.startsWith("d20") || (tag.length === 4 && tag.startsWith("d") && abilityMap[tag.slice(1)]);
+  const isD20Tag = tag === "d20" || tag.startsWith("d20") || (tag.length === 4 && tag.startsWith("d") && abilityMap[tag.slice(1)]) || tag === "atkr" || tag === "actSave" || tag === "actResponse" || tag === "actTrigger";
 
   if (tag === "dice" || tag === "damage" || tag === "hit" || tag === "dc" || tag === "atk" || tag === "h" || tag === "recharge" || tag === "language" || isD20Tag) {
     // These are simple tags that don't need popups for now, just styling
@@ -212,7 +212,7 @@ const TagComponent: React.FC<TagProps> = ({ tag, name, source, displayText }) =>
     if (tag === "hit") label = `+${name}`;
     if (tag === "dc") label = `DC ${name}`;
     
-    if (tag === "atk" || tag === "d20") {
+    if (tag === "atk" || tag === "atkr" || tag === "d20") {
       const atkMap: Record<string, string> = {
         'mw': 'Melee Weapon Attack:',
         'rw': 'Ranged Weapon Attack:',
@@ -225,7 +225,7 @@ const TagComponent: React.FC<TagProps> = ({ tag, name, source, displayText }) =>
       };
       if (atkMap[name]) {
         label = atkMap[name];
-      } else if (tag === "d20") {
+      } else if (tag === "d20" || tag === "atkr") {
         label = displayText || name;
       }
     }
@@ -235,18 +235,35 @@ const TagComponent: React.FC<TagProps> = ({ tag, name, source, displayText }) =>
       ability = tag.slice(3);
     } else if (tag.length === 4 && tag.startsWith("d") && abilityMap[tag.slice(1)]) {
       ability = tag.slice(1);
+    } else if (tag === "actSave") {
+      ability = name;
     }
 
     if (ability) {
       const abilityName = abilityMap[ability] || capitalize(ability);
-      label = `${abilityName} Saving Throw: DC ${name}`;
+      if (tag === "actSave") {
+        label = `${abilityName} Saving Throw: `;
+      } else {
+        label = `${abilityName} Saving Throw: DC ${name}`;
+      }
+    }
+
+    if (tag === "actResponse") {
+      label = "Response—";
+    }
+
+    if (tag === "actTrigger") {
+      label = "Trigger: ";
     }
 
     if (tag === "h") label = "Hit: ";
     if (tag === "recharge") label = `(Recharge ${name}${name === "6" ? "" : "–6"})`;
     
-    if (tag === "atk" || (tag === "d20" && (name === 'mw' || name === 'rw' || name === 'ma' || name === 'ra' || name === 'm' || name === 'r' || name === 'm,r' || name === 'r,m'))) {
+    if (tag === "atk" || tag === "atkr" || (tag === "d20" && (name === 'mw' || name === 'rw' || name === 'ma' || name === 'ra' || name === 'm' || name === 'r' || name === 'm,r' || name === 'r,m'))) {
       return <span className="italic">{label}</span>;
+    }
+    if (tag === "actResponse" || tag === "actTrigger") {
+      return <span className="font-bold italic">{label}</span>;
     }
     if (tag === "language") return <span className="text-inherit font-normal">{label}</span>;
     return <span className="font-bold text-[var(--accent)]">{label}</span>;
