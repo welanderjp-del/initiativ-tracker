@@ -69,6 +69,54 @@ const calculatePB = (cr: string) => {
 
 const capitalize = (s: string) => s ? s.charAt(0).toUpperCase() + s.slice(1) : "";
 
+const formatSpellTime = (time: any) => {
+  if (!time || !Array.isArray(time)) return "";
+  return time.map((t: any) => `${t.number} ${t.unit}${t.condition ? ` (${t.condition})` : ""}`).join(", ");
+};
+
+const formatSpellRange = (range: any) => {
+  if (!range) return "";
+  if (range.type === "special") return "Special";
+  if (range.distance) {
+    const dist = range.distance;
+    if (dist.type === "self") return "Self";
+    if (dist.type === "touch") return "Touch";
+    if (dist.type === "sight") return "Sight";
+    if (dist.type === "unlimited") return "Unlimited";
+    return `${dist.amount} ${dist.type}`;
+  }
+  return range.type || "";
+};
+
+const formatSpellComponents = (components: any) => {
+  if (!components) return "";
+  const parts = [];
+  if (components.v) parts.push("V");
+  if (components.s) parts.push("S");
+  if (components.r) parts.push("R");
+  if (components.m) {
+    if (typeof components.m === 'string') parts.push(`M (${components.m})`);
+    else if (components.m.text) parts.push(`M (${components.m.text})`);
+    else parts.push("M");
+  }
+  return parts.join(", ");
+};
+
+const formatSpellDuration = (duration: any) => {
+  if (!duration || !Array.isArray(duration)) return "";
+  return duration.map((d: any) => {
+    let s = "";
+    if (d.concentration) s += "Concentration, ";
+    if (d.type === "instant") s += "Instantaneous";
+    else if (d.type === "permanent") s += "Permanent";
+    else if (d.type === "special") s += "Special";
+    else if (d.duration) {
+      s += `${d.duration.number} ${d.duration.unit}${d.duration.number > 1 ? "s" : ""}`;
+    }
+    return s;
+  }).join(", ");
+};
+
 const schoolMap: Record<string, string> = {
   'A': 'Abjuration',
   'C': 'Conjuration',
@@ -189,9 +237,17 @@ const TagComponent: React.FC<TagProps> = ({ tag, name, source, displayText }) =>
                 <h3 className="text-lg font-bold text-[var(--accent)] border-b border-[var(--border)] pb-1 uppercase">{data.name}</h3>
                 <div className="opacity-90 leading-relaxed">
                   {tag === "spell" && (
-                    <div className="mb-2 italic text-xs opacity-70">
-                      {data.level === 0 ? "Cantrip" : `Level ${data.level}`} {schoolMap[data.school] || data.school}
-                    </div>
+                    <>
+                      <div className="mb-2 italic text-xs opacity-70">
+                        {data.level === 0 ? "Cantrip" : `Level ${data.level}`} {schoolMap[data.school] || data.school}
+                      </div>
+                      <div className="grid grid-cols-1 gap-1 mb-3 text-xs border-y border-[#d1c9b8]/30 py-2">
+                        <div><span className="font-bold">Casting Time:</span> {formatSpellTime(data.time)}</div>
+                        <div><span className="font-bold">Range:</span> {formatSpellRange(data.range)}</div>
+                        <div><span className="font-bold">Components:</span> {formatSpellComponents(data.components)}</div>
+                        <div><span className="font-bold">Duration:</span> {formatSpellDuration(data.duration)}</div>
+                      </div>
+                    </>
                   )}
                   {tag === "action" && data.time && (
                     <div className="mb-2 italic text-xs opacity-70">
@@ -322,7 +378,7 @@ export const EntryRenderer: React.FC<{ entry: any; inline?: boolean }> = ({ entr
                 <div className="mt-1">
                   {Object.entries(entry.daily).map(([freq, spells]: [string, any], i) => (
                     <div key={i}>
-                      <span className="italic">{freq.replace('e', '/day each')}: </span>
+                      <span className="italic">{freq.endsWith('e') ? freq.replace('e', '/day each') : (freq.includes('/') ? freq : `${freq}/day`)}: </span>
                       {spells.map((s: string, j: number) => (
                         <React.Fragment key={j}>
                           {j > 0 && ", "}{parseTags(s)}
